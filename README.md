@@ -83,6 +83,31 @@ client editions, even installed side by side on one device from one origin.
 - Everything the client app does: scoring, comparison of two assessments, the charts, the
   PDF report
 
+## It holds both assessments, each from many assessors
+
+A consolidation is **a self assessment and an external assessment together**, and each of
+those is built from **as many assessors as it takes** — four people on the self side and
+three on the external side is an ordinary case. The two sides are held, averaged and
+annotated separately and never mix.
+
+So there is no "assessment type" to set here. That setting describes one assessor's
+submission, not your consolidation, and asking for it made it look as though only one side
+could be held. **Setup → What this copy is doing** offers *Consolidating* (the normal
+state) or *Comparing two finished assessments*.
+
+**Setup → The two assessments being consolidated** shows each side's coverage: how many of
+the 350 are answered, which assessors contributed and how many answers each, and how many
+questions had to be averaged.
+
+**Assess → Moderating: Self | External** decides which side a score you type yourself lands
+in, so you can correct either without touching a setting. The assessor editions have no such
+switch by design — their side is fixed so a score cannot be filed against the wrong one.
+
+With both sides populated, the dashboard and report label the two series **Self** and
+**External** and show the alignment and the largest gaps. Consolidate only self submissions
+and they name the single series after the assessment's own title instead, and drop the gap
+columns — the same rule the client editions follow.
+
 The merging engine is **physically absent** from the client builds — stripped at build
 time, not hidden behind a flag. Opening a client edition's source and hunting for it will
 not find it; it was never compiled in. The build asserts this on the built artefact of
@@ -96,7 +121,7 @@ leave merge-capable code recoverable from an earlier commit.
 ## Releasing a change
 
 1. Replace `index.html`
-2. **Bump `const CACHE` in `sw.js`** — currently `cvm-consolidate-v1`
+2. **Bump `const CACHE` in `sw.js`** — currently `cvm-consolidate-v3`
 3. Commit and push; Pages redeploys within a minute
 
 Without step 2, a device that already installed it keeps serving its cached copy. Answers

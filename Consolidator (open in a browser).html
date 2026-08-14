@@ -144,6 +144,10 @@ body.has-fab main{padding-bottom:calc(146px + env(safe-area-inset-bottom))}
   display:flex;align-items:center;justify-content:center;gap:7px
 }
 .lanes button[aria-pressed="true"]{background:var(--surface-2);color:var(--text-primary);box-shadow:var(--shadow)}
+/* The moderating switch inside the lane bar: same control, sized to sit in a row. */
+.lanes.laneseg{flex:none;margin:0;gap:4px}
+.lanes.laneseg button{padding:0 11px;min-height:34px;font-size:13px;display:inline-flex;align-items:center;gap:6px}
+.lanes.laneseg .swatch{width:9px;height:9px;flex:none}
 .swatch{width:9px;height:9px;border-radius:2px;flex:none}
 .sw1{background:var(--series-1)} .sw2{background:var(--series-2)}
 
@@ -222,6 +226,18 @@ textarea:focus,input:focus{outline:2px solid var(--accent);outline-offset:-1px}
 .dualpair .d1{background:var(--series-1)} .dualpair .d2{background:var(--series-2)}
 .dualpair .dn{background:var(--surface-0);color:var(--text-muted);border:1px dashed var(--border-strong)}
 /* ---------- dashboard ---------- */
+/* Names the assessment on screen. Without it the only thing identifying the data
+   was the series labels, which is thin with one series and ambiguous with two. */
+.dashhead{margin:2px 0 14px}
+.dashhead .dh-kicker{font-size:11px;font-weight:650;letter-spacing:.05em;text-transform:uppercase;color:var(--text-muted)}
+.dashhead .dh-title{font-size:20px;font-weight:680;letter-spacing:-.015em;line-height:1.25;margin-top:3px;overflow-wrap:anywhere}
+.dashhead .dh-sub{font-size:12.5px;color:var(--text-secondary);margin-top:3px;line-height:1.35}
+.dashhead .dh-pair{margin-top:5px}
+.dashhead .dh-pair>span{display:flex;align-items:center;gap:8px;font-size:16px;font-weight:650;line-height:1.3;overflow-wrap:anywhere}
+.dashhead .dh-pair>span .swatch{flex:none}
+.dashhead .dh-pair em{font-style:normal;font-weight:550;color:var(--text-muted)}
+.dashhead .dh-pair .vs{display:block;font-size:10.5px;font-weight:650;letter-spacing:.07em;text-transform:uppercase;
+  color:var(--text-muted);margin:3px 0 3px 20px}
 .hero{display:flex;gap:10px;margin-bottom:12px}
 .tile{
   flex:1;background:var(--surface-1);border:1px solid var(--border);border-radius:var(--radius);
@@ -319,10 +335,21 @@ svg.barchart{align-self:stretch}
 .lanefixed span{display:block;font-size:12px;color:var(--text-muted);line-height:1.4;margin-top:2px}
 
 /* ---------- active assessment type ---------- */
+/* The two assessments a consolidation holds, side by side. */
+.lanestack{display:flex;flex-direction:column;gap:10px;margin-top:12px}
+.lanecard{background:var(--surface-0);border:1px solid var(--border);border-radius:var(--radius);padding:11px 12px}
+.lanecard.lane-self{border-left:3px solid var(--series-1)}
+.lanecard.lane-external{border-left:3px solid var(--series-2)}
+.lanecard-head{display:flex;align-items:center;gap:8px;font-size:13.5px}
+.lanecard-head strong{flex:1;min-width:0}
+.lanecard-head span{font-size:12.5px;color:var(--text-secondary);font-variant-numeric:tabular-nums;flex:none}
+.lanecard .meter{margin:8px 0 6px}
+.lanecard-who{font-size:11.5px;color:var(--text-muted);line-height:1.35;overflow-wrap:anywhere}
 .lanebar{display:flex;align-items:center;gap:9px;background:var(--surface-1);border:1px solid var(--border);
   border-radius:11px;box-shadow:var(--shadow);padding:10px 13px;margin-bottom:12px;font-size:13.5px}
 .lanebar .swatch{width:11px;height:11px;flex:none}
 .lanebar span{font-weight:650;flex:1;min-width:0}
+.lanebar span:first-child{font-size:11px;letter-spacing:.05em;text-transform:uppercase;color:var(--text-muted)}
 .lanebar em{font-style:normal;font-size:11.5px;color:var(--text-muted);flex:none}
 .lanebar.lane-self{border-left:3px solid var(--series-1)}
 .lanebar.lane-external{border-left:3px solid var(--series-2)}
@@ -540,7 +567,7 @@ const FIXED_LANE = null;
 const CONSOLIDATOR = /*__CONSOLIDATOR__*/true;
 const KEY = FIXED_LANE ? "cvm-assess-" + FIXED_LANE + "-v1"
           : CONSOLIDATOR ? "cvm-consolidate-v1" : "cvm-assess-v1";
-const BUILD = "1.6 \u00b7 14 Aug 2026";   // shown in Setup so you can tell builds apart
+const BUILD = "1.8 · 14 Aug 2026";   // shown in Setup so you can tell builds apart
 const AREA_BY_ID = {};
 DATA.areas.forEach(a => { AREA_BY_ID[a.id] = a; });
 const TOTAL_Q = DATA.areas.reduce((n, a) => n + a.questions.length, 0);
@@ -575,7 +602,7 @@ let state = {
   client: "",                // set per engagement; the workbook's client is not assumed
   title: "",                 // assessment title/reference — distinguishes runs for the same client
   assessor: "",
-  type: FIXED_LANE || "self",     // self | external | comparison
+  type: CONSOLIDATOR ? "consolidate" : (FIXED_LANE || "self"),   // self | external | consolidate | comparison
   lane: FIXED_LANE || "self",     // which slot scoring writes to
   cmpA: null, cmpB: null,         // the two assessments being compared
   responses: seedFromWorkbook(),
@@ -592,10 +619,21 @@ let undoSnapshot = null;     // one-step undo for the last merge
     if (s && typeof s === "object") state = Object.assign(state, s);
   } catch (e) { /* keep defaults */ }
   if (FIXED_LANE) { state.type = FIXED_LANE; state.lane = FIXED_LANE; }   // the lock always wins
-  if (state.type !== "comparison") state.lane = state.type === "external" ? "external" : "self";
+  if (CONSOLIDATOR && state.type !== "comparison") {
+    /* A consolidation holds a self assessment AND an external assessment, each
+       built from as many assessors as it takes. "This is a self assessment" is a
+       statement about one assessor's submission, not about the consolidation, so
+       the consolidator has no such setting. State stored by an earlier build
+       carried one: keep the lane it named, drop the claim. */
+    if (state.type === "self" || state.type === "external") state.lane = state.type;
+    state.type = "consolidate";
+  } else if (state.type !== "comparison") {
+    state.lane = state.type === "external" ? "external" : "self";
+  }
 })();
 let saveTimer = null;
 function save() {
+  forgetLanes();                 // a score may have just appeared or gone
   clearTimeout(saveTimer);
   saveTimer = setTimeout(() => store.set(JSON.stringify(state)), 220);
 }
@@ -652,7 +690,43 @@ const laneName = l => l === "self" ? "Self assessment" : "External assessment";
    The two-series machinery — charts, gaps, tables, report — is identical either
    way; only the labels change, which is why comparison needed no new analytics. */
 const COMPARING = () => state.type === "comparison";
+/* Consolidating: both assessments held at once, and state.lane says only which
+   of them a score typed by the moderator lands in. */
+const CONSOLIDATING = () => state.type === "consolidate";
 const typeName = t => t === "comparison" ? "Comparison" : laneName(t);
+
+/* ---------- what the two series actually hold ----------
+   The dashboard and the report name a series for the data in it, not for the
+   slot it occupies. Holding two assessments side by side, "Self" and
+   "External" (or the two titles) are the useful names. Holding one assessment
+   on its own, the useful name is that assessment's title — a client running a
+   single self assessment should see their own title on the chart, not the word
+   "Self" against an empty "External".
+
+   Scanning every response to answer that would be far too slow: the labels are
+   asked for inside render loops. So it is computed once and cached, and the
+   cache is dropped whenever anything is written (save) or a render begins. */
+let LANES_CACHE = null;
+function forgetLanes() { LANES_CACHE = null; }   /* declared, so save() can call it from above */
+function lanesInPlay() {
+  if (LANES_CACHE) return LANES_CACHE;
+  let sa = false, ea = false;
+  for (const k in state.responses) {
+    const r = state.responses[k];
+    if (!r) continue;
+    if (!sa && r.sa != null) sa = true;
+    if (!ea && r.ea != null) ea = true;
+    if (sa && ea) break;
+  }
+  /* Nothing scored yet counts as the lane being worked on, so a titled
+     assessment carries its title from the first screen rather than acquiring
+     it on the first tap. */
+  let only = sa !== ea ? (sa ? "sa" : "ea") : null;
+  if (!sa && !ea && !COMPARING()) only = state.lane === "external" ? "ea" : "sa";
+  return (LANES_CACHE = { sa, ea, only, both: sa && ea });
+}
+
+const trim18 = t => t.length > 18 ? t.slice(0, 17) + "\u2026" : t;
 
 /* Long and short labels for the two series, whatever they currently represent. */
 function seriesLabel(slot, short) {
@@ -660,10 +734,27 @@ function seriesLabel(slot, short) {
     const t = slot === "sa" ? (state.cmpA && state.cmpA.title) : (state.cmpB && state.cmpB.title);
     const fallback = slot === "sa" ? "Assessment A" : "Assessment B";
     if (!t) return fallback;
-    return short ? (t.length > 18 ? t.slice(0, 17) + "\u2026" : t) : t;
+    return short ? trim18(t) : t;
   }
+  const title = (state.title || "").trim();
+  if (title && lanesInPlay().only === slot) return short ? trim18(title) : title;
   if (slot === "sa") return short ? "Self" : "Self assessment";
   return short ? "Ext" : "External assessment";
+}
+
+/* The heading the dashboard and the report put at the top: what am I looking at?
+   Returns the pieces rather than markup, so both can lay it out their own way. */
+function dashSubject() {
+  const client = (state.client || "").trim();
+  if (COMPARING()) {
+    return { kind: "comparison", client,
+             a: state.cmpA ? (state.cmpA.title || "Untitled assessment") : null,
+             b: state.cmpB ? (state.cmpB.title || "Untitled assessment") : null };
+  }
+  const L = lanesInPlay();
+  return { kind: L.both ? "two-lane" : "single", client,
+           title: (state.title || "").trim(),
+           lane: L.both ? null : (L.only === "ea" ? "external" : "self") };
 }
 const LBL_A = s => seriesLabel("sa", s);
 const LBL_B = s => seriesLabel("ea", s);
@@ -774,11 +865,26 @@ function areaListHTML() {
   </div>`;
 }
 
-/* No lane switch on the scoring screens. The assessment type is set once in
-   Setup, so a score can never land in a lane you did not mean — which is the
-   whole reason the comparison edition exists separately from the assessor ones.
-   This shows which lane is live instead. */
+/* No lane switch on the assessor editions' scoring screens. The assessment type
+   is set once in Setup, so a score can never land in a lane you did not mean —
+   which is the whole reason the comparison edition exists separately from the
+   assessor ones. This shows which lane is live instead.
+
+   The consolidator is the exception: it holds both assessments, so moderating a
+   score means saying which one, and making that a trip to Setup would be absurd
+   when the fix is one tap away from the question. */
 function laneSwitchHTML() {
+  if (CONSOLIDATING()) {
+    const L = lanesInPlay();
+    const n = lane => { const k = lane === "self" ? "sa" : "ea"; return L[k] ? "" : " (empty)"; };
+    return `<div class="lanebar lane-${state.lane}">
+      <span>Moderating</span>
+      <div class="lanes laneseg" role="group" aria-label="Which assessment a score you type lands in">
+        <button data-setlane="self" aria-pressed="${state.lane === "self"}"><i class="swatch sw1"></i>Self${n("self")}</button>
+        <button data-setlane="external" aria-pressed="${state.lane === "external"}"><i class="swatch sw2"></i>External${n("external")}</button>
+      </div>
+    </div>`;
+  }
   if (COMPARING()) {
     return `<div class="lanebar lane-cmp">
       <i class="swatch sw1"></i><i class="swatch sw2" style="margin-left:-4px"></i>
@@ -992,7 +1098,8 @@ function wrapLabel(s, maxChars, maxLines) {
 let REPORT_MODE = false;
 const numberedFor = N => REPORT_MODE || N > 8 || window.innerWidth < 480;
 
-function radarSVG(cats, W) {
+function radarSVG(cats, W, slots) {
+  slots = slots || ["sa", "ea"];
   const N = cats.length;
   if (!N) return "";
   const size = Math.min(W, 520);
@@ -1030,7 +1137,8 @@ function radarSVG(cats, W) {
   }
 
   // series — self drawn first so external reads on top
-  [["sa", "var(--series-1)"], ["ea", "var(--series-2)"]].forEach(([k, col]) => {
+  slots.forEach(k => {
+    const col = SERIES[k].css;
     if (cats.every(c => c.st[k] == null)) return;
     const pts = cats.map((c, i) => pt(i, c.st[k] == null ? 0 : c.st[k]));
     g += `<polygon points="${pts.map(p => p.map(n => n.toFixed(1)).join(",")).join(" ")}"
@@ -1049,11 +1157,11 @@ function radarSVG(cats, W) {
     const p1 = [cx + (R + 20) * Math.cos(a1), cy + (R + 20) * Math.sin(a1)];
     g += `<polygon class="wedge" points="${cx},${cy} ${p0.map(n => n.toFixed(1)).join(",")} ${p1.map(n => n.toFixed(1)).join(",")}"
       fill="transparent" data-cat="${svgEsc(cats[i].key)}" tabindex="0" role="button"
-      aria-label="${svgEsc(cats[i].name)}: self ${fmt(cats[i].st.sa)}, external ${fmt(cats[i].st.ea)}"/>`;
+      aria-label="${svgEsc(cats[i].name)}: ${slots.map(k => SERIES[k].lbl(true) + " " + fmt(cats[i].st[k])).join(", ")}"/>`;
   }
 
   return `<svg class="radar" viewBox="0 0 ${size} ${size}" width="${size}" height="${size}" role="img"
-    aria-label="Radar chart comparing self and external maturity across ${N} categories">${g}</svg>`;
+    aria-label="Radar chart of ${svgEsc(slots.map(k => SERIES[k].lbl()).join(" and "))} maturity across ${N} categories">${g}</svg>`;
 }
 
 function radarKeyHTML(cats) {
@@ -1065,10 +1173,11 @@ function radarKeyHTML(cats) {
 /* ============================================================
    GROUPED BAR
    ============================================================ */
-function barsSVG(cats, W) {
+function barsSVG(cats, W, slots) {
+  slots = slots || ["sa", "ea"];
   const N = cats.length;
   if (!N) return "";
-  const gutter = 36, rowH = 50, top = 6, axisH = 20;
+  const gutter = 36, rowH = slots.length > 1 ? 50 : 37, top = 6, axisH = 20;
   const plotW = W - gutter;
   const H = top + N * rowH + axisH;
   const x = v => (v == null ? 0 : (v / MAXS) * plotW);
@@ -1092,8 +1201,9 @@ function barsSVG(cats, W) {
     g += `<text x="0" y="${y0 + 12}" font-size="12.5" font-weight="${on ? 700 : 600}" fill="var(--text-primary)"
       font-family="inherit">${svgEsc(short(c.name, Math.max(18, Math.floor(W / 7.6))))}</text>`;
 
-    // two 11px bars, 2px surface gap between them, 4px rounded data-end
-    [["sa", "var(--series-1)"], ["ea", "var(--series-2)"]].forEach(([k, col], j) => {
+    // an 11px bar per series, 2px surface gap between them, 4px rounded data-end
+    slots.forEach((k, j) => {
+      const col = SERIES[k].css;
       const v = c.st[k], by = y0 + 19 + j * 13;
       if (v == null) {
         if (j === 0) g += `<text x="0" y="${by + 17}" font-size="10.5" fill="var(--text-muted)" font-family="inherit">not scored</text>`;
@@ -1107,19 +1217,53 @@ function barsSVG(cats, W) {
 
     g += `<rect x="-8" y="${y0 - 2}" width="${W + 10}" height="${rowH - 2}" fill="transparent"
       data-cat="${svgEsc(c.key)}" tabindex="0" role="button"
-      aria-label="${svgEsc(c.name)}: self ${fmt(c.st.sa)}, external ${fmt(c.st.ea)}"/>`;
+      aria-label="${svgEsc(c.name)}: ${slots.map(k => SERIES[k].lbl(true) + " " + fmt(c.st[k])).join(", ")}"/>`;
   });
 
   return `<svg class="barchart" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" role="img"
-    aria-label="Grouped bar chart comparing self and external maturity across ${N} categories">${g}</svg>`;
+    aria-label="Bar chart of ${svgEsc(slots.map(k => SERIES[k].lbl()).join(" and "))} maturity across ${N} categories">${g}</svg>`;
 }
 
 /* ============================================================
    VIEW
    ============================================================ */
-const legendHTML = () => `<div class="legend">
-  <span><i style="background:var(--series-1)"></i>${esc(LBL_A())}</span>
-  <span><i style="background:var(--series-2)"></i>${esc(LBL_B())}</span></div>`;
+/* A legend lists the series that are on the chart. With one assessment loaded
+   there is one series, and a second entry naming an empty one is a claim the
+   chart does not support. */
+const SERIES = { sa: { css: "var(--series-1)", sw: "sw1", lbl: LBL_A },
+                 ea: { css: "var(--series-2)", sw: "sw2", lbl: LBL_B } };
+function dashSlots() {
+  if (COMPARING()) return ["sa", "ea"];          // both expected; an empty slot is worth showing
+  const L = lanesInPlay();
+  if (L.both) return ["sa", "ea"];
+  return [L.only || "sa"];
+}
+const legendHTML = slots => `<div class="legend">${slots.map(k =>
+  `<span><i style="background:${SERIES[k].css}"></i>${esc(SERIES[k].lbl())}</span>`).join("")}</div>`;
+
+/* The dashboard says which assessment it is showing, by name. Without this the
+   only thing naming the data was the series labels, which is thin when there is
+   one series and ambiguous when there are two. */
+function dashHeadHTML(o) {
+  const d = dashSubject();
+  if (d.kind === "comparison") {
+    const row = (t, k, slot) => `<span><i class="swatch ${SERIES[k].sw}"></i>${
+      t ? esc(t) : `<em>Assessment ${slot} \u2014 not loaded</em>`}</span>`;
+    return `<div class="dashhead">
+      <div class="dh-kicker">Comparing two assessments</div>
+      <div class="dh-pair">${row(d.a, "sa", "A")}<span class="vs">versus</span>${row(d.b, "ea", "B")}</div>
+      <div class="dh-sub">${d.client ? esc(d.client) + " &middot; " : ""}${o.both} of ${o.n} questions in both</div>
+    </div>`;
+  }
+  const name = d.title || d.client || "Untitled assessment";
+  const scored = d.kind === "two-lane" ? `${o.saN} self and ${o.eaN} external answers`
+    : `${(d.lane === "external" ? o.eaN : o.saN)} of ${o.n} scored`;
+  return `<div class="dashhead">
+    <div class="dh-kicker">${d.kind === "two-lane" ? "Self versus external" : esc(laneName(d.lane))}</div>
+    <div class="dh-title">${esc(name)}</div>
+    <div class="dh-sub">${d.client && d.title ? esc(d.client) + " &middot; " : ""}${scored}</div>
+  </div>`;
+}
 
 function slicerHTML() {
   const sel = new Set(ui.areaFilter || []);
@@ -1139,15 +1283,14 @@ function slicerHTML() {
   </div>`;
 }
 
-function readoutHTML(cats, withDrill) {
+function readoutHTML(cats, withDrill, slots) {
   const c = ui.pick == null ? null : cats.find(x => x.key === ui.pick);
   if (!c) return `<div class="readout muted">Tap a point or a bar for its figures.</div>`;
   return `<div class="readout">
     <div class="ro-name">${esc(c.name)}${ui.level === "subject" ? `<span class="ro-area">${esc(c.area)}</span>` : ""}</div>
     <div class="ro-vals">
-      <span><i class="swatch sw1"></i><b>${fmt(c.st.sa)}</b> ${esc(LBL_A(true))}</span>
-      <span><i class="swatch sw2"></i><b>${fmt(c.st.ea)}</b> ${esc(LBL_B(true))}</span>
-      ${gapChip(c.st.gap)}
+      ${slots.map(k => `<span><i class="swatch ${SERIES[k].sw}"></i><b>${fmt(c.st[k])}</b> ${esc(SERIES[k].lbl(true))}</span>`).join("")}
+      ${slots.length > 1 ? gapChip(c.st.gap) : ""}
       <span class="ro-n">${c.st.n} q</span>
     </div>
     ${withDrill && ui.level === "area"
@@ -1172,89 +1315,97 @@ function renderDash() {
   }).filter(Boolean).filter(x => x.g !== 0).sort((x, y) => Math.abs(y.g) - Math.abs(x.g)).slice(0, 12);
 
   const radarTooMany = cats.length > 14;
-  const sorted = cats.slice().sort((a, b) => (a.st.sa == null ? 99 : a.st.sa) - (b.st.sa == null ? 99 : b.st.sa));
+  const slots = dashSlots();                 // which series the data actually supports
+  const two = slots.length > 1;
+  const primary = slots[0];                  // "weakest first" sorts on the series in play
+  const sorted = cats.slice().sort((a, b) =>
+    (a.st[primary] == null ? 99 : a.st[primary]) - (b.st[primary] == null ? 99 : b.st[primary]));
 
   v.innerHTML = `
+  ${dashHeadHTML(o)}
   ${slicerHTML()}
 
   <div class="hero">
-    <div class="tile">
-      <div class="lbl"><i class="swatch sw1"></i>${esc(LBL_A(true))}</div>
-      <div class="val">${fmt(o.sa)}<small> /8</small></div>
-      <div class="cap">${o.saN} of ${o.n} scored</div>
-    </div>
-    <div class="tile">
-      <div class="lbl"><i class="swatch sw2"></i>${esc(LBL_B(true))}</div>
-      <div class="val">${fmt(o.ea)}<small> /8</small></div>
-      <div class="cap">${o.eaN} of ${o.n} scored</div>
-    </div>
+    ${slots.map(k => `<div class="tile">
+      <div class="lbl"><i class="swatch ${SERIES[k].sw}"></i>${esc(SERIES[k].lbl(two))}</div>
+      <div class="val">${fmt(o[k])}<small> /8</small></div>
+      <div class="cap">${!two && o[k] != null ? esc(levelFor(o[k])) + " &middot; " : ""}${k === "sa" ? o.saN : o.eaN} of ${o.n} scored</div>
+    </div>`).join("")}
   </div>
 
-  <div class="card tight">
+  ${!two ? "" : `<div class="card tight">
     <div class="card-title" style="margin-bottom:7px">Overall alignment &middot; ${esc(scope)}</div>
     <div style="display:flex;align-items:center;gap:12px">
-      <div style="font-size:27px;font-weight:680;font-variant-numeric:tabular-nums;line-height:1.1">${o.gap == null ? "—" : (o.gap > 0 ? "+" : "") + fmt(o.gap)}</div>
+      <div style="font-size:27px;font-weight:680;font-variant-numeric:tabular-nums;line-height:1.1">${o.gap == null ? "\u2014" : (o.gap > 0 ? "+" : "") + fmt(o.gap)}</div>
       <div style="flex:1;min-width:0;font-size:12.5px;color:var(--text-secondary);line-height:1.35">
         ${o.gap == null ? "Both assessments needed to compare."
           : COMPARING()
             ? (Math.abs(o.gap) < 0.25 ? "The two assessments are broadly level."
                : o.gap < 0 ? esc(LBL_B()) + " scores lower overall than " + esc(LBL_A()) + "."
-               : esc(LBL_B()) + " scores higher overall than " + esc(LBL_A()) + " — maturity has moved on.")
+               : esc(LBL_B()) + " scores higher overall than " + esc(LBL_A()) + " \u2014 maturity has moved on.")
           : Math.abs(o.gap) < 0.25 ? "External and self assessments broadly agree."
-          : o.gap < 0 ? "External assessor scores lower than self assessment — likely over-confidence."
-          : "External assessor scores higher than self assessment — likely under-recognised capability."}
+          : o.gap < 0 ? "External assessor scores lower than self assessment \u2014 likely over-confidence."
+          : "External assessor scores higher than self assessment \u2014 likely under-recognised capability."}
       </div>
     </div>
     <div class="meter" aria-hidden="true"><i style="width:${o.n ? ((o.both / o.n) * 100).toFixed(1) : 0}%"></i></div>
     <div style="font-size:11.5px;color:var(--text-muted);margin-top:6px">${o.both} of ${o.n} questions comparable</div>
-  </div>
+  </div>`}
 
   <div class="section-label">Maturity profile</div>
   <div class="card">
-    <div class="card-note">Self versus external across ${cats.length} ${ui.level === "subject" ? "subjects" : "areas"}. The outer ring is 8, the top of the scale.</div>
-    ${legendHTML()}
+    <div class="card-note">${two ? esc(LBL_A()) + " versus " + esc(LBL_B()) : esc(SERIES[primary].lbl())}
+      across ${cats.length} ${ui.level === "subject" ? "subjects" : "areas"}. The outer ring is 8, the top of the scale.</div>
+    ${legendHTML(slots)}
     <div class="chart-wide"><div class="chart-host" data-chart="radar">${radarTooMany
       ? `<div class="empty"><div class="big">Too many points for a radar</div><div>${cats.length} categories. Select a single assessment area above to see its subject radar &mdash; all ${cats.length} are still plotted in the bar chart below.</div></div>`
       : ""}</div>${radarTooMany ? "" : radarKeyHTML(cats)}</div>
-    ${radarTooMany ? "" : readoutHTML(cats, true)}
+    ${radarTooMany ? "" : readoutHTML(cats, true, slots)}
   </div>
 
-  <div class="section-label">Score comparison</div>
+  <div class="section-label">${two ? "Score comparison" : "Scores"}</div>
   <div class="card">
     <div class="card-note">Lowest maturity first, so the weakest ${ui.level === "subject" ? "subjects" : "areas"} sit at the top.</div>
-    ${legendHTML()}
+    ${legendHTML(slots)}
     <div class="chart-host" data-chart="bars"></div>
-    ${readoutHTML(cats, true)}
+    ${readoutHTML(cats, true, slots)}
     <div class="qactions"><button class="minibtn" data-act="toggletable">${ui.showTable ? "Hide" : "Show"} table view</button></div>
     ${ui.showTable ? `<div class="tablewrap" style="margin-top:10px"><table class="dt">
-      <thead><tr><th>${ui.level === "subject" ? "Subject" : "Area"}</th><th>${esc(LBL_A(true))}</th><th>${esc(LBL_B(true))}</th><th>Gap</th><th>Q</th></tr></thead>
-      <tbody>${sorted.map(c => `<tr><td>${esc(c.name)}</td><td><b>${fmt(c.st.sa)}</b></td><td><b>${fmt(c.st.ea)}</b></td><td>${c.st.gap == null ? "—" : (c.st.gap > 0 ? "+" : "") + fmt(c.st.gap)}</td><td>${c.st.n}</td></tr>`).join("")}
-      <tr><td><b>${esc(scope)}</b></td><td><b>${fmt(o.sa)}</b></td><td><b>${fmt(o.ea)}</b></td><td>${o.gap == null ? "—" : (o.gap > 0 ? "+" : "") + fmt(o.gap)}</td><td>${o.n}</td></tr></tbody></table></div>` : ""}
+      <thead><tr><th>${ui.level === "subject" ? "Subject" : "Area"}</th>${
+        slots.map(k => `<th>${esc(SERIES[k].lbl(true))}</th>`).join("")}${two ? "<th>Gap</th>" : ""}<th>Q</th></tr></thead>
+      <tbody>${sorted.map(c => `<tr><td>${esc(c.name)}</td>${
+        slots.map(k => `<td><b>${fmt(c.st[k])}</b></td>`).join("")}${
+        two ? `<td>${c.st.gap == null ? "\u2014" : (c.st.gap > 0 ? "+" : "") + fmt(c.st.gap)}</td>` : ""}<td>${c.st.n}</td></tr>`).join("")}
+      <tr><td><b>${esc(scope)}</b></td>${slots.map(k => `<td><b>${fmt(o[k])}</b></td>`).join("")}${
+        two ? `<td>${o.gap == null ? "\u2014" : (o.gap > 0 ? "+" : "") + fmt(o.gap)}</td>` : ""}<td>${o.n}</td></tr></tbody></table></div>` : ""}
   </div>
 
-  <div class="section-label">Largest self vs external gaps</div>
+  ${!two ? "" : `
+  <div class="section-label">${COMPARING() ? "Largest differences between the two" : "Largest self vs external gaps"}</div>
   <div class="card">
     ${gaps.length === 0
-      ? `<div class="empty"><div class="big">No gaps to show</div><div>Score the same questions in both lanes to compare them.</div></div>`
+      ? `<div class="empty"><div class="big">No differences to show</div><div>${COMPARING()
+          ? "The two assessments agree on every question scored in both."
+          : "Score the same questions in both lanes to compare them."}</div></div>`
       : `<div class="card-note">Questions where the two assessments diverge most. Tap to open the question.</div>
          <div class="gaplist">${gaps.map(x => `<button class="gapitem" style="text-align:left;width:100%;background:none" data-goto="${x.aid}|${x.i}">
            <div class="txt"><div class="q">${esc(x.q)}</div><div class="a">${esc(x.area)} &middot; ${esc(x.subj)} &middot; ${esc(LBL_A(true))} ${x.s} / ${esc(LBL_B(true))} ${x.e}</div></div>
            ${gapChip(x.g)}
          </button>`).join("")}</div>`}
-  </div>`;
+  </div>`}`;
 
-  drawCharts(cats, sorted, radarTooMany);
+  drawCharts(cats, sorted, radarTooMany, slots);
 }
 
 /* SVGs are generated at the container's measured pixel width, so their text
    renders 1:1 rather than being scaled by a viewBox. */
-function drawCharts(cats, sorted, radarTooMany) {
+function drawCharts(cats, sorted, radarTooMany, slots) {
   document.querySelectorAll("#view-dash .chart-host").forEach(host => {
     const W = Math.max(240, host.clientWidth);
     if (host.dataset.chart === "radar") {
-      if (!radarTooMany) host.innerHTML = radarSVG(cats, W);
+      if (!radarTooMany) host.innerHTML = radarSVG(cats, W, slots);
     } else {
-      host.innerHTML = barsSVG(sorted, W);
+      host.innerHTML = barsSVG(sorted, W, slots);
     }
   });
 }
@@ -1625,6 +1776,45 @@ function averagedQuestions() {
 /* ============================================================
    SETUP / EXPORT
    ============================================================ */
+/* What each of the two assessments actually contains — asked of the scores and
+   the submission log, not of a setting. This is the answer to "have I got enough
+   back from everybody yet", per assessment, which is the question a consolidator
+   is always asking. */
+function laneRollup(lane) {
+  const key = lane === "self" ? "sa" : "ea";
+  let scored = 0, averaged = 0;
+  const who = new Map();
+  DATA.areas.forEach(a => a.questions.forEach((q, i) => {
+    if (val(a.id, i, lane) != null) scored++;
+    const src = srcOf(a.id, i, lane);
+    if (src.length > 1) averaged++;
+    src.forEach(c => who.set(c.by || "unnamed", (who.get(c.by || "unnamed") || 0) + 1));
+  }));
+  return { lane, scored, averaged, total: TOTAL_Q, assessors: [...who.keys()], counts: who };
+}
+
+function laneRollupHTML() {
+  return `<div class="lanestack">${["self", "external"].map(lane => {
+    const r = laneRollup(lane);
+    const pct = r.total ? (r.scored / r.total) * 100 : 0;
+    const names = r.assessors.length
+      ? r.assessors.map(n => esc(n) + " (" + r.counts.get(n) + ")").join(", ")
+      : "no submissions yet";
+    return `<div class="lanecard lane-${lane}">
+      <div class="lanecard-head">
+        <i class="swatch ${lane === "self" ? "sw1" : "sw2"}"></i>
+        <strong>${esc(laneName(lane))}</strong>
+        <span>${r.scored} of ${r.total}</span>
+      </div>
+      <div class="meter" aria-hidden="true"><i style="width:${pct.toFixed(1)}%;background:${
+        lane === "self" ? "var(--series-1)" : "var(--series-2)"}"></i></div>
+      <div class="lanecard-who">${r.assessors.length
+        ? `${r.assessors.length} assessor${r.assessors.length === 1 ? "" : "s"} &middot; ${names}`
+        : names}${r.averaged ? ` &middot; ${r.averaged} averaged` : ""}</div>
+    </div>`;
+  }).join("")}</div>`;
+}
+
 function renderMore() {
   const AVG_COUNT = averagedQuestions().length;
   $("#view-more").innerHTML = `
@@ -1640,6 +1830,19 @@ function renderMore() {
              <div><strong>${esc(laneName(FIXED_LANE))}</strong>
              <span>Fixed for this copy of the app, so your answers cannot be filed against the wrong assessment.</span></div></div>
          </div>`
+      : CONSOLIDATOR
+      ? `<div class="field"><label for="fLane">What this copy is doing</label>
+           <select id="fLane">
+             <option value="consolidate" ${CONSOLIDATING() ? "selected" : ""}>Consolidating &mdash; self and external, many assessors</option>
+             <option value="comparison" ${state.type === "comparison" ? "selected" : ""}>Comparing two finished assessments</option>
+           </select>
+         </div>
+         <div class="hintbox">${CONSOLIDATING()
+           ? `A consolidation holds <b>both</b> a self assessment and an external assessment, each built from as many
+              assessors as you need. Every submission is filed into one of the two as you import it, so there is no
+              assessment type to set here.`
+           : `Scoring is switched off in this mode. Import two finished assessments below and the charts, tables and
+              report compare them, labelled by their own titles.`}</div>`
       : `<div class="field"><label for="fLane">Assessment type</label>
            <select id="fLane">
              <option value="self" ${state.type === "self" ? "selected" : ""}>Self assessment</option>
@@ -1687,11 +1890,14 @@ function renderMore() {
     }).join("")}
   </div>`}
 
-  ${(FIXED_LANE || !CONSOLIDATOR) ? "" : `
+  ${(FIXED_LANE || !CONSOLIDATOR || COMPARING()) ? "" : `
   <div class="card">
-    <div class="card-title">Combine assessments</div>
-    <div class="card-note">Import the JSON files your assessors send back. Blanks are filled from whoever answered; where two people answered the same question the scores are averaged and both are recorded in that question's notes.</div>
-    <div class="btnrow">
+    <div class="card-title">The two assessments being consolidated</div>
+    <div class="card-note">Each is built from as many assessors as you need. Blanks are filled from whoever answered;
+      where two people answered the same question the scores are averaged, rounded down, and both are recorded in
+      that question's notes.</div>
+    ${laneRollupHTML()}
+    <div class="btnrow" style="margin-top:12px">
       <button class="bigbtn primary" data-act="merge">Import &amp; combine submissions</button>
       ${undoSnapshot ? `<button class="bigbtn" data-act="undomerge">Undo last import</button>` : ""}
     </div>
@@ -1700,7 +1906,8 @@ function renderMore() {
       <div class="scalelist">
         ${contributorList().map(c => `<div class="scaleitem">
           <div class="d"><strong>${esc(c.name)}</strong>
-            <span>${c.selfN} self &middot; ${c.extN} external${c.files > 1 ? " &middot; " + c.files + " files" : ""}</span></div>
+            <span>${c.selfN ? c.selfN + " self" : ""}${c.selfN && c.extN ? " &middot; " : ""}${c.extN ? c.extN + " external" : ""}${
+              !c.selfN && !c.extN ? "no answers" : ""}${c.files > 1 ? " &middot; " + c.files + " files" : ""}</span></div>
         </div>`).join("")}
       </div>
       <div style="font-size:12px;color:var(--text-muted);margin-top:9px">${state.submissions.length} submission${state.submissions.length === 1 ? "" : "s"} merged.
@@ -1771,7 +1978,7 @@ function renderMore() {
   </div>
   <div style="text-align:center;font-size:11.5px;color:var(--text-muted);padding:6px 0 4px;line-height:1.6">
     ${TOTAL_Q} questions &middot; ${DATA.areas.length} areas &middot; from CVM Maturity Assessment Comparison v1.0<br>
-    <span style="font-variant-numeric:tabular-nums">Build ${BUILD}</span> &middot; ${FIXED_LANE ? esc(laneName(FIXED_LANE)) + " edition" : CONSOLIDATOR ? "consolidator edition" : "assessment edition"} &middot; ${NATIVE ? "native iOS" : INSTALLED ? "installed web app" : "browser"}
+    <span style="font-variant-numeric:tabular-nums">Build ${BUILD}</span> &middot; ${FIXED_LANE ? esc(laneName(FIXED_LANE)) + " edition" : CONSOLIDATOR ? (COMPARING() ? "consolidator edition \u00b7 comparing" : "consolidator edition")  : "assessment edition"} &middot; ${NATIVE ? "native iOS" : INSTALLED ? "installed web app" : "browser"}
   </div>`;
 }
 
@@ -1928,17 +2135,31 @@ function gapCell(g) {
 }
 
 function buildReportHTML() {
+  forgetLanes();
   const o = reportStats();
+  /* The report shows what the assessment holds, named the same way the dashboard
+     names it: one series and its title where one assessment was done, both
+     series and a gap column where there are two to compare. A column headed
+     "External" with nothing under it is not a finding, it is an unfinished
+     document. */
+  const slots = dashSlots();
+  const two = slots.length > 1;
+  const primary = slots[0];
+  const th = (abbr) => slots.map(k => `<th class="num">${esc(SERIES[k].lbl(abbr))}</th>`).join("");
+  const legend = `<div class="legend">${slots.map(k =>
+    `<span><i style="background:${k === "sa" ? REPORT_PALETTE.s1 : REPORT_PALETTE.s2}"></i>${esc(SERIES[k].lbl())}</span>`).join("")}</div>`;
+  const cells = st => slots.map(k => `<td class="num">${fmt(st[k])}</td>`).join("");
   const areaCats = DATA.areas.map(a => ({ key: a.id, name: a.name, area: a.name, aid: a.id, st: areaStats(a) }));
-  const byWeakest = areaCats.slice().sort((x, y) => (x.st.sa == null ? 99 : x.st.sa) - (y.st.sa == null ? 99 : y.st.sa));
+  const byWeakest = areaCats.slice().sort((x, y) =>
+    (x.st[primary] == null ? 99 : x.st[primary]) - (y.st[primary] == null ? 99 : y.st[primary]));
 
   // charts: fixed widths that suit A4 at ~96dpi with 18mm margins
   const savedPick = ui.pick;
   ui.pick = null;
   REPORT_MODE = true;
-  const radar = literalise(radarSVG(areaCats, 460));
+  const radar = literalise(radarSVG(areaCats, 460, slots));
   const radarKey = areaCats.map((c, i) => `<li><b>${i + 1}</b> ${esc(c.name)}</li>`).join("");
-  const bars = literalise(barsSVG(byWeakest, 660));
+  const bars = literalise(barsSVG(byWeakest, 660, slots));
   REPORT_MODE = false;
   ui.pick = savedPick;
 
@@ -1956,21 +2177,20 @@ function buildReportHTML() {
 
   const subjectSections = DATA.areas.map(a => {
     const subs = subjectsOf(a).map(sx => ({ name: sx.name, st: stats(sx.qs, a.id) }))
-      .sort((x, y) => (x.st.sa == null ? 99 : x.st.sa) - (y.st.sa == null ? 99 : y.st.sa));
+      .sort((x, y) => (x.st[primary] == null ? 99 : x.st[primary]) - (y.st[primary] == null ? 99 : y.st[primary]));
     const st = areaStats(a);
     return `<section class="area-block">
       <h3>${esc(a.name)}</h3>
-      <p class="lead">${esc(LBL_A(true))} ${fmt(st.sa)} &middot; ${esc(LBL_B(true))} ${fmt(st.ea)} &middot;
-        ${st.gap == null ? "not comparable" : (Math.abs(st.gap) < 0.05 ? "aligned" :
-          (st.gap > 0 ? "external " + fmt(st.gap) + " higher" : "external " + fmt(Math.abs(st.gap)) + " lower"))}
+      <p class="lead">${slots.map(k => esc(SERIES[k].lbl(true)) + " " + fmt(st[k])).join(" &middot; ")}${two ? " &middot; " +
+        (st.gap == null ? "not comparable" : (Math.abs(st.gap) < 0.05 ? "aligned" :
+          (st.gap > 0 ? esc(LBL_B(true)) + " " + fmt(st.gap) + " higher" : esc(LBL_B(true)) + " " + fmt(Math.abs(st.gap)) + " lower"))) : ""}
         &middot; ${st.n} questions</p>
       <table>
-        <thead><tr><th>Subject</th><th class="num">${esc(LBL_A(true))}</th><th class="num">${esc(LBL_B(true))}</th><th class="num">Gap</th><th class="num">Q</th></tr></thead>
+        <thead><tr><th>Subject</th>${th(true)}${two ? '<th class="num">Gap</th>' : ""}<th class="num">Q</th></tr></thead>
         <tbody>${subs.map(sx => `<tr>
           <td>${esc(sx.name)}</td>
-          <td class="num">${fmt(sx.st.sa)}</td>
-          <td class="num">${fmt(sx.st.ea)}</td>
-          ${gapCell(sx.st.gap)}
+          ${cells(sx.st)}
+          ${two ? gapCell(sx.st.gap) : ""}
           <td class="num">${sx.st.n}</td></tr>`).join("")}</tbody>
       </table>
     </section>`;
@@ -1983,13 +2203,13 @@ function buildReportHTML() {
       ${DATA.areas.map(a => `
         <h3>${esc(a.name)}</h3>
         <table class="qtable">
-          <thead><tr><th>Question</th><th class="num">${esc(LBL_A(true))}</th><th class="num">${esc(LBL_B(true))}</th><th>Notes</th></tr></thead>
+          <thead><tr><th>Question</th>${th(true)}<th>Notes</th></tr></thead>
           <tbody>${a.questions.map((q, i) => {
             const notes = [notesFor(a.id, i, "self"), notesFor(a.id, i, "external")].filter(Boolean).join(" — ");
             return `<tr>
               <td><span class="subj">${esc(q.subject)}</span>${esc(q.q)}</td>
-              <td class="num">${val(a.id, i, "self") == null ? "—" : val(a.id, i, "self")}</td>
-              <td class="num">${val(a.id, i, "external") == null ? "—" : val(a.id, i, "external")}</td>
+              ${slots.map(k => { const v = val(a.id, i, k === "sa" ? "self" : "external");
+                return `<td class="num">${v == null ? "\u2014" : v}</td>`; }).join("")}
               <td class="notes">${esc(notes)}</td></tr>`;
           }).join("")}</tbody>
         </table>`).join("")}
@@ -2057,11 +2277,14 @@ function buildReportHTML() {
 <div class="cover">
   ${LOGO ? `<img class="brand" src="${LOGO}" alt="Manhattan CVLM">` : ""}
   <div class="kicker">Contract Value Management${COMPARING() ? " \u00b7 Comparison" : ""}</div>
-  <h1>${esc(state.title || "Maturity Assessment")}</h1>
+  <h1>${esc(COMPARING() ? (LBL_A() + " vs " + LBL_B()) : (state.title || "Maturity Assessment"))}</h1>
   <div class="client">${esc(state.client || "")}</div>
   <dl>
     <dt>Report date</dt><dd>${reportDate()}</dd>
-    <dt>Questions assessed</dt><dd>${o.saN} self, ${o.eaN} external, of ${TOTAL_Q}</dd>
+    <dt>${COMPARING() ? "Assessments compared" : "Questions assessed"}</dt>
+    <dd>${COMPARING() ? `${esc(LBL_A())} and ${esc(LBL_B())}, ${o.both} questions in both`
+        : two ? `${o.saN} self, ${o.eaN} external, of ${TOTAL_Q}`
+        : `${primary === "sa" ? o.saN : o.eaN} of ${TOTAL_Q} \u00b7 ${esc(laneName(primary === "sa" ? "self" : "external"))}`}</dd>
     <dt>Contributors</dt><dd>${contributors.length ? contributors.map(c => esc(c.name)).join(", ") : esc(state.assessor || "—")}</dd>
     <dt>Consolidated by</dt><dd>${esc(state.assessor || "—")}</dd>
   </dl>
@@ -2070,32 +2293,36 @@ function buildReportHTML() {
 <section class="page-break">
   <h2>Executive summary</h2>
   <div class="kpis">
-    <div class="kpi"><div class="l"><i style="background:${REPORT_PALETTE.s1}"></i>${esc(LBL_A())}</div>
-      <div class="v">${fmt(o.sa)}<small> / 8</small></div><div class="c">${levelFor(o.sa)}</div></div>
-    <div class="kpi"><div class="l"><i style="background:${REPORT_PALETTE.s2}"></i>${esc(LBL_B())}</div>
-      <div class="v">${fmt(o.ea)}<small> / 8</small></div><div class="c">${levelFor(o.ea)}</div></div>
-    <div class="kpi"><div class="l">Alignment</div>
-      <div class="v">${o.gap == null ? "—" : (o.gap > 0 ? "+" : "") + fmt(o.gap)}</div>
-      <div class="c">${o.both} of ${TOTAL_Q} comparable</div></div>
+    ${slots.map(k => `<div class="kpi"><div class="l"><i style="background:${k === "sa" ? REPORT_PALETTE.s1 : REPORT_PALETTE.s2}"></i>${esc(SERIES[k].lbl())}</div>
+      <div class="v">${fmt(o[k])}<small> / 8</small></div><div class="c">${levelFor(o[k])}</div></div>`).join("")}
+    ${!two ? `<div class="kpi"><div class="l">Questions scored</div>
+      <div class="v">${primary === "sa" ? o.saN : o.eaN}<small> / ${TOTAL_Q}</small></div>
+      <div class="c">${Math.round(((primary === "sa" ? o.saN : o.eaN) / TOTAL_Q) * 100)}% complete</div></div>`
+    : `<div class="kpi"><div class="l">Alignment</div>
+      <div class="v">${o.gap == null ? "\u2014" : (o.gap > 0 ? "+" : "") + fmt(o.gap)}</div>
+      <div class="c">${o.both} of ${TOTAL_Q} comparable</div></div>`}
   </div>
-  <p>${o.gap == null
+  <p>${!two
+      ? `Overall maturity sits at <b>${fmt(o[primary])} of 8</b> (${levelFor(o[primary])}), across the ${
+          primary === "sa" ? o.saN : o.eaN} question${(primary === "sa" ? o.saN : o.eaN) === 1 ? "" : "s"} scored in
+          ${esc(SERIES[primary].lbl())}.`
+      : o.gap == null
       ? "Only one of the two assessments has been completed, so no comparison is available yet."
       : Math.abs(o.gap) < 0.25
         ? `Overall maturity sits at <b>${fmt(o.sa)} of 8</b> (${levelFor(o.sa)}). The self and external assessments broadly agree, which suggests the organisation has a realistic view of its own capability.`
         : o.gap < 0
           ? `Overall maturity sits at <b>${fmt(o.ea)} of 8</b> on the external assessment against <b>${fmt(o.sa)}</b> self-assessed. The external view is <b>${fmt(Math.abs(o.gap))} points lower</b>, indicating the organisation rates itself above the evidence available — the gap itself is a finding, since remediation plans built on the self-assessment would start from an optimistic baseline.`
           : `Overall maturity sits at <b>${fmt(o.ea)} of 8</b> on the external assessment against <b>${fmt(o.sa)}</b> self-assessed. The external view is <b>${fmt(o.gap)} points higher</b>, indicating capability that exists but is under-recognised internally — often a sign that good practice is present but not documented or credited.`}</p>
-  <p><b>Weakest areas.</b> ${byWeakest.slice(0, 3).map(c => esc(c.name) + " (" + fmt(c.st.sa) + ")").join(", ")} score lowest on the self assessment and are the natural focus for improvement.</p>
+  <p><b>Weakest areas.</b> ${byWeakest.slice(0, 3).map(c => esc(c.name) + " (" + fmt(c.st[primary]) + ")").join(", ")}
+    score lowest on ${esc(SERIES[primary].lbl())} and are the natural focus for improvement.</p>
   ${averaged.length ? `<p><b>Consolidation.</b> ${contributors.length} assessors contributed. ${averaged.length} question${averaged.length === 1 ? " was" : "s were"} answered by more than one assessor; those scores are the average of the contributions, rounded down to the nearest level. The contributing scores are recorded against each question.</p>` : ""}
 </section>
 
 <section class="page-break avoid-break">
   <h2>Maturity profile</h2>
-  <p class="lead">Self versus external across the ${DATA.areas.length} assessment areas. The outer ring is 8, the top of the scale.</p>
-  <div class="legend">
-    <span><i style="background:${REPORT_PALETTE.s1}"></i>${esc(LBL_A())}</span>
-    <span><i style="background:${REPORT_PALETTE.s2}"></i>${esc(LBL_B())}</span>
-  </div>
+  <p class="lead">${two ? esc(LBL_A()) + " versus " + esc(LBL_B()) : esc(SERIES[primary].lbl())} across the
+    ${DATA.areas.length} assessment areas. The outer ring is 8, the top of the scale.</p>
+  ${legend}
   <div class="avoid-break">
     <div class="chart">${radar}</div>
     <ol class="rkey">${radarKey}</ol>
@@ -2105,16 +2332,13 @@ function buildReportHTML() {
 <section class="page-break">
   <h2>Scores by assessment area</h2>
   <p class="lead">Lowest maturity first.</p>
-  <div class="legend">
-    <span><i style="background:${REPORT_PALETTE.s1}"></i>${esc(LBL_A())}</span>
-    <span><i style="background:${REPORT_PALETTE.s2}"></i>${esc(LBL_B())}</span>
-  </div>
+  ${legend}
   <div class="chart">${bars}</div>
   <table>
-    <thead><tr><th>Assessment area</th><th class="num">${esc(LBL_A(true))}</th><th class="num">${esc(LBL_B(true))}</th><th class="num">Gap</th><th class="num">Questions</th></tr></thead>
+    <thead><tr><th>Assessment area</th>${th(true)}${two ? '<th class="num">Gap</th>' : ""}<th class="num">Questions</th></tr></thead>
     <tbody>
-      ${byWeakest.map(c => `<tr><td>${esc(c.name)}</td><td class="num">${fmt(c.st.sa)}</td><td class="num">${fmt(c.st.ea)}</td>${gapCell(c.st.gap)}<td class="num">${c.st.n}</td></tr>`).join("")}
-      <tr><td><b>All areas</b></td><td class="num"><b>${fmt(o.sa)}</b></td><td class="num"><b>${fmt(o.ea)}</b></td>${gapCell(o.gap)}<td class="num"><b>${TOTAL_Q}</b></td></tr>
+      ${byWeakest.map(c => `<tr><td>${esc(c.name)}</td>${cells(c.st)}${two ? gapCell(c.st.gap) : ""}<td class="num">${c.st.n}</td></tr>`).join("")}
+      <tr><td><b>All areas</b></td>${slots.map(k => `<td class="num"><b>${fmt(o[k])}</b></td>`).join("")}${two ? gapCell(o.gap) : ""}<td class="num"><b>${TOTAL_Q}</b></td></tr>
     </tbody>
   </table>
 </section>
@@ -2127,9 +2351,9 @@ function buildReportHTML() {
 
 ${topGaps.length ? `<section class="page-break">
   <h2>Largest divergences</h2>
-  <p class="lead">Questions where the self and external assessments differ most. These are the conversations worth having first.</p>
+  <p class="lead">Questions where ${esc(LBL_A())} and ${esc(LBL_B())} differ most. These are the conversations worth having first.</p>
   <table>
-    <thead><tr><th>Question</th><th class="num">${esc(LBL_A(true))}</th><th class="num">${esc(LBL_B(true))}</th><th class="num">Gap</th></tr></thead>
+    <thead><tr><th>Question</th>${th(true)}<th class="num">Gap</th></tr></thead>
     <tbody>${topGaps.map(x => `<tr>
       <td><span class="subj" style="display:block;font-size:7.5pt;letter-spacing:.04em;text-transform:uppercase;color:${REPORT_PALETTE.ink3}">${esc(x.area)} &middot; ${esc(x.subj)}</span>${esc(x.q)}</td>
       <td class="num">${x.s}</td><td class="num">${x.e}</td>${gapCell(x.g)}</tr>`).join("")}</tbody>
@@ -2148,12 +2372,13 @@ ${topGaps.length ? `<section class="page-break">
     <li>Each question is answered once per assessment by a single assessor; unanswered questions are filled from whichever contributor completed them.</li>
     <li>Where two or more assessors answered the same question, the consolidated score is the mean of their scores, rounded down to the nearest whole level.</li>
     <li>Area and subject figures are the unweighted mean of the question scores within them, so areas with more questions carry proportionally more detail but no extra weight.</li>
-    <li>Only questions answered in both the self and external assessments contribute to a gap figure.</li>
+    ${two ? "<li>Only questions answered in both assessments contribute to a gap figure.</li>" : ""}
   </ul>
   ${contributors.length ? `<h3>Contributors</h3>
   <table>
-    <thead><tr><th>Assessor</th><th class="num">Self answers</th><th class="num">External answers</th></tr></thead>
-    <tbody>${contributors.map(c => `<tr><td>${esc(c.name)}</td><td class="num">${c.selfN}</td><td class="num">${c.extN}</td></tr>`).join("")}</tbody>
+    <thead><tr><th>Assessor</th>${slots.map(k => `<th class="num">${esc(SERIES[k].lbl(true))} answers</th>`).join("")}</tr></thead>
+    <tbody>${contributors.map(c => `<tr><td>${esc(c.name)}</td>${
+      slots.map(k => `<td class="num">${k === "sa" ? c.selfN : c.extN}</td>`).join("")}</tr>`).join("")}</tbody>
   </table>` : ""}
   <div class="foot">
     ${LOGO ? `<img class="brand-sm" src="${LOGO}" alt="Manhattan CVLM">` : ""}
@@ -2221,6 +2446,7 @@ function chrome() {
 }
 function render(keepScroll) {
   const y = window.scrollY;
+  forgetLanes();          // labels are named for the data, so re-read it
   // chrome() first: it unhides the target view, so charts can measure a real
   // container width instead of 0 (a hidden element has no layout).
   chrome();
@@ -2272,6 +2498,13 @@ document.querySelector("main").addEventListener("click", e => {
   const t = e.target;
 
   if (t.closest("[data-gotolane]")) { ui.tab = "more"; render(); toast("Assessment type is set here"); return; }
+  const setLane = t.closest("[data-setlane]");
+  if (setLane) {
+    state.lane = setLane.dataset.setlane;
+    ui.pick = null; save(); render(true);
+    toast("Moderating the " + (state.lane === "self" ? "self" : "external") + " assessment");
+    return;
+  }
 
   const cmpLoad = t.closest("[data-cmpload]");
   if (cmpLoad) { cmpSlot = cmpLoad.dataset.cmpload; $("#cmpIn").click(); return; }
@@ -2420,10 +2653,12 @@ document.querySelector("main").addEventListener("change", e => {
   if (e.target.id === "fAssessor") { state.assessor = e.target.value.trim(); save(); }
   if (e.target.id === "fLane") {
     state.type = e.target.value;
-    if (state.type !== "comparison") state.lane = state.type;
+    if (state.type !== "comparison" && state.type !== "consolidate") state.lane = state.type;
     ui.area = null; ui.pick = null;
     save(); render();
-    toast(state.type === "comparison" ? "Comparison mode" : "Now completing: " + laneName(state.lane));
+    toast(state.type === "comparison" ? "Comparison mode"
+      : state.type === "consolidate" ? "Consolidating self and external"
+      : "Now completing: " + laneName(state.lane));
   }
   if (warnSig() !== before && ui.tab === "more") render(true);
 });

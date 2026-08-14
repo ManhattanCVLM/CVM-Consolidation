@@ -1,8 +1,33 @@
 # Running an assessment across several assessors
 
-Build 1.2 adds combining. The short version: everyone fills in their part on their own
-device, exports one JSON file, sends it to you, and you import them all. You get one
-consolidated assessment and a client-ready PDF.
+The short version: everyone fills in their part on their own device, exports one JSON
+file, sends it to you, and you import them all. You get one consolidated assessment and a
+client-ready PDF.
+
+---
+
+## What a consolidation holds
+
+**Both assessments at once** — a self assessment and an external assessment — and **each
+one is built from as many assessors as it takes**. Four people on the self side and three
+on the external side is an ordinary case, not a special one.
+
+That is why the consolidator has no "assessment type" setting. "This is the self
+assessment" is a statement about one assessor's submission, not about your consolidation,
+and the earlier build asking you to pick one made it look as though a consolidation could
+only hold one side. Instead, **Setup → What this copy is doing** offers:
+
+- **Consolidating** — self and external, many assessors (the normal state)
+- **Comparing two finished assessments** — the client-facing comparison, still available
+  here when you want it
+
+Each submission is filed into one of the two sides as you import it, and the two never mix:
+a self answer and an external answer to the same question are held separately, averaged
+separately, and annotated separately.
+
+**Setup → The two assessments being consolidated** shows each side's coverage — how many of
+the 350 are answered, which assessors contributed and how many answers each, and how many
+questions had to be averaged. It is the "have I got enough back yet" view, per side.
 
 ---
 
@@ -84,6 +109,17 @@ blindly appended — so there's no harm in being unsure whether you already did 
 **Undo last import** appears after any merge and rolls the whole step back. Beyond that
 one step, your safety net is exporting a JSON before you start combining.
 
+### Correcting a score on either side
+
+Averages are a starting point, not a verdict. On the **Assess** screen the consolidator
+carries a **Moderating: Self | External** switch at the top — it decides which of the two
+assessments a score *you* type lands in. Tap a number and it overrides the average on that
+side only; the contributing scores stay on record and the note says you set it.
+
+The assessor editions have no such switch on purpose: their lane is fixed so a score
+cannot be filed against the wrong side. The consolidator is the one place where choosing
+is the whole point.
+
 ### Reviewing what was averaged
 
 Setup tells you how many questions had more than one answer. To see them: **Assess →** any
@@ -101,7 +137,7 @@ assessor and their score per question.
 
 ## Sending it to the client
 
-**Setup → Send to the client → Create PDF report.**
+**Setup → Create PDF Report → Create PDF report.**
 
 You get: a cover page with the title, client, date and contributors; an executive summary
 that reads the self-vs-external gap and names the weakest areas; the radar and bar charts;
@@ -122,8 +158,9 @@ send from your Mac).
 ## One caveat I should flag
 
 The merge logic, the report layout and the PDF pagination I tested properly — synthetic
-submissions from three assessors, checked against hand-computed averages, including
-three-way collisions, re-imports and overrides.
+submissions from seven assessors across both sides at once, checked against hand-computed
+averages, including three-way collisions, re-imports, overrides on each side
+independently, and the two sides not contaminating each other.
 
 The **native PDF generation is new Swift code I could not compile or run**, since there's
 no macOS in my environment. If **Create PDF report** does nothing or errors on the phone,
