@@ -567,7 +567,7 @@ const FIXED_LANE = null;
 const CONSOLIDATOR = /*__CONSOLIDATOR__*/true;
 const KEY = FIXED_LANE ? "cvm-assess-" + FIXED_LANE + "-v1"
           : CONSOLIDATOR ? "cvm-consolidate-v1" : "cvm-assess-v1";
-const BUILD = "1.8 · 14 Aug 2026";   // shown in Setup so you can tell builds apart
+const BUILD = "1.9 · 14 Aug 2026";   // shown in Setup so you can tell builds apart
 const AREA_BY_ID = {};
 DATA.areas.forEach(a => { AREA_BY_ID[a.id] = a; });
 const TOTAL_Q = DATA.areas.reduce((n, a) => n + a.questions.length, 0);
@@ -603,6 +603,7 @@ let state = {
   title: "",                 // assessment title/reference — distinguishes runs for the same client
   assessor: "",
   type: CONSOLIDATOR ? "consolidate" : (FIXED_LANE || "self"),   // self | external | consolidate | comparison
+  autoAdvance: true,              // move to the next question after scoring one
   lane: FIXED_LANE || "self",     // which slot scoring writes to
   cmpA: null, cmpB: null,         // the two assessments being compared
   responses: seedFromWorkbook(),
@@ -1926,6 +1927,16 @@ function renderMore() {
     </div>
   </div>`}
 
+  ${COMPARING() ? "" : `
+  <div class="card">
+    <div class="card-title">While you score</div>
+    <div class="btnrow">
+      <label class="checkrow"><input type="checkbox" id="fAuto" ${state.autoAdvance ? "checked" : ""}>
+        <span>Move to the next question automatically<small>After you score a question, the next one scrolls into
+          view. Changing a score you have already given never moves the page.</small></span></label>
+    </div>
+  </div>`}
+
   <div class="card">
     <div class="card-title">Export &amp; backup</div>
     <div class="card-note">Send the JSON to whoever is consolidating; it is also your backup. CSV opens in Excel with the same columns as the comparison workbook.</div>
@@ -2570,17 +2581,81 @@ document.querySelector("main").addEventListener("click", e => {
 
   const sc = t.closest("[data-score]");
   if (sc) {
+    if (advancing()) return;                       // the page is still moving; that tap was meant for elsewhere
     const card = sc.closest(".qcard"), [aid, i] = card.dataset.q.split("|");
     const n = +sc.dataset.score, cur = val(aid, +i, state.lane);
     setScore(aid, +i, state.lane, n === cur ? null : n);
     haptic(n === cur ? "soft" : "light");
     refreshCard(card, aid, +i);
+    /* Only on the first score for this question: changing one must not move the page. */
+    if (cur == null && n !== cur) advanceFrom(document.querySelector(`.qcard[data-q="${aid}|${i}"]`));
     return;
   }
 
   const act = t.closest("[data-act]");
   if (act) { handleAct(act.dataset.act, act); return; }
 });
+
+/* ============================================================
+   AUTO-ADVANCE
+
+   350 questions on a phone means 350 manual scrolls, so scoring one brings the
+   next into view. Two things it must not do:
+
+   • Move when you are CHANGING a score. It advances only on a question that had
+     no score, so correcting one never pulls the page out from under you.
+   • Let the next tap land on the wrong question. The scroll takes a moment, and
+     a finger already on its way down would hit whatever slid into that spot, so
+     score taps are ignored until the movement is done. 380ms — below the point
+     where a deliberate tap feels swallowed, above the length of the animation.
+   ============================================================ */
+const REDUCED_MOTION = (() => {
+  try { return window.matchMedia("(prefers-reduced-motion: reduce)").matches; } catch (e) { return false; }
+})();
+let advanceUntil = 0;
+const advancing = () => Date.now() < advanceUntil;
+
+function scrollCardIntoPlace(el) {
+  const head = document.querySelector("header");
+  const pad = (head ? head.getBoundingClientRect().height : 0) + 10;
+  const top = Math.max(0, window.scrollY + el.getBoundingClientRect().top - pad);
+  advanceUntil = Date.now() + 380;
+  window.scrollTo({ top: top, behavior: REDUCED_MOTION ? "auto" : "smooth" });
+}
+
+/* The next question on screen. Cards in collapsed subjects are in the DOM but
+   hidden, so the walk opens the next subject rather than scrolling to something
+   invisible — otherwise every subject ends in a dead stop. */
+function nextCardAfter(card) {
+  const body = card.closest(".subjbody");
+  if (!body) return null;
+  const here = [...body.querySelectorAll(".qcard")];
+  const k = here.indexOf(card);
+  if (k > -1 && here[k + 1]) return here[k + 1];
+
+  let group = card.closest(".subjgroup");
+  while (group && (group = group.nextElementSibling)) {
+    if (!group.classList || !group.classList.contains("subjgroup")) continue;
+    const b = group.querySelector(".subjbody"), first = b && b.querySelector(".qcard");
+    if (!first) continue;
+    if (b.hidden) {
+      const head = group.querySelector(".subjhead");
+      b.hidden = false;
+      head.setAttribute("aria-expanded", "true");
+      ui.open[head.dataset.subj] = true;
+    }
+    return first;
+  }
+  return null;
+}
+
+function advanceFrom(card) {
+  if (!state.autoAdvance) return;
+  const next = nextCardAfter(card);
+  if (next) { scrollCardIntoPlace(next); return; }
+  const aid = ui.area;
+  if (aid && !unansweredIdx(aid).length) toast("All " + AREA_BY_ID[aid].questions.length + " scored in this area");
+}
 
 function refreshCard(card, aid, i) {
   const a = AREA_BY_ID[aid], q = Object.assign({}, a.questions[i], { __i: i });
@@ -2650,6 +2725,10 @@ document.querySelector("main").addEventListener("change", e => {
   if (e.target.id === "fClient") { state.client = e.target.value.trim(); save(); chrome(); }
   if (e.target.id === "fTitle") { state.title = e.target.value.trim(); save(); chrome(); }
   if (e.target.id === "fAppendix") { ui.reportAppendix = e.target.checked; }
+  if (e.target.id === "fAuto") {
+    state.autoAdvance = e.target.checked; save();
+    toast(state.autoAdvance ? "Will move to the next question" : "Will stay where you are");
+  }
   if (e.target.id === "fAssessor") { state.assessor = e.target.value.trim(); save(); }
   if (e.target.id === "fLane") {
     state.type = e.target.value;
