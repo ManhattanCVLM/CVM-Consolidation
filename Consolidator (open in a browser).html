@@ -516,8 +516,10 @@ body.sheet-open{overflow:hidden}
     <section class="view" id="view-more" hidden></section>
   </main>
 
+  <!-- One button. "Previous gap" jumped to the largest self-vs-external divergence,
+       which is meaningless in an edition holding one assessment and duplicated by the
+       tappable list on the dashboard in the ones that hold two. -->
   <div class="fabrow" id="fabrow" hidden>
-    <button class="ghost" id="fabPrev">&#8249; Previous gap</button>
     <button id="fabNext">Next unanswered &#8250;</button>
   </div>
 
@@ -568,7 +570,7 @@ const FIXED_LANE = null;
 const CONSOLIDATOR = /*__CONSOLIDATOR__*/true;
 const KEY = FIXED_LANE ? "cvm-assess-" + FIXED_LANE + "-v1"
           : CONSOLIDATOR ? "cvm-consolidate-v1" : "cvm-assess-v1";
-const BUILD = "2.1 · 15 Aug 2026";   // shown in Setup so you can tell builds apart
+const BUILD = "2.2 · 15 Aug 2026";   // shown in Setup so you can tell builds apart
 const AREA_BY_ID = {};
 DATA.areas.forEach(a => { AREA_BY_ID[a.id] = a; });
 const TOTAL_Q = DATA.areas.reduce((n, a) => n + a.questions.length, 0);
@@ -2574,8 +2576,6 @@ function chrome() {
   const inArea = ui.tab === "assess" && ui.area, inDashArea = false;
   $("#backBtn").hidden = !(inArea || inDashArea);
   $("#fabrow").hidden = !inArea;
-  /* Jumping to the biggest self-vs-external divergence needs two assessments. */
-  $("#fabPrev").hidden = SOLO_UI();
   document.body.classList.toggle("has-fab", !!inArea);
   const t = $("#title"), s = $("#subtitle");
   if (inArea) { t.textContent = AREA_BY_ID[ui.area].name; s.textContent = laneName(state.lane) + " · " + (state.client || "no client"); }
@@ -3032,17 +3032,6 @@ $("#fabNext").addEventListener("click", () => {
     if (el) el.scrollIntoView({ block: "center", behavior: "smooth" });
   });
 });
-$("#fabPrev").addEventListener("click", () => {
-  if (!ui.area) return;
-  const aid = ui.area;
-  const list = AREA_BY_ID[aid].questions.map((q, i) => {
-    const s = val(aid, i, "self"), e = val(aid, i, "external");
-    return (s != null && e != null) ? { i, g: Math.abs(e - s) } : null;
-  }).filter(Boolean).sort((a, b) => b.g - a.g);
-  if (!list.length || list[0].g === 0) { toast("No self vs external gaps in this area"); return; }
-  gotoQuestion(aid, list[0].i);
-});
-
 /* SVG marks are focusable buttons — Enter/Space must act like a tap. */
 document.querySelector("main").addEventListener("keydown", e => {
   if (e.key !== "Enter" && e.key !== " ") return;
