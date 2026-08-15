@@ -121,7 +121,7 @@ leave merge-capable code recoverable from an earlier commit.
 ## Releasing a change
 
 1. Replace `index.html`
-2. **Bump `const CACHE` in `sw.js`** — currently `cvm-consolidate-v4`
+2. **Bump `const CACHE` in `sw.js`** — currently `cvm-consolidate-v5`
 3. Commit and push; Pages redeploys within a minute
 
 Without step 2, a device that already installed it keeps serving its cached copy. Answers

@@ -468,6 +468,7 @@ body.sheet-open{overflow:hidden}
 }
 .fabrow button.ghost{background:var(--surface-2);color:var(--text-primary);border:1px solid var(--border-strong)}
 .fabrow[hidden]{display:none}
+.fabrow button[hidden]{display:none}   /* one button alone spans the row */
 .sronly{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
 
 /* ---------- iPad / wide ---------- */
@@ -569,7 +570,7 @@ const FIXED_LANE = null;
 const CONSOLIDATOR = /*__CONSOLIDATOR__*/true;
 const KEY = FIXED_LANE ? "cvm-assess-" + FIXED_LANE + "-v1"
           : CONSOLIDATOR ? "cvm-consolidate-v1" : "cvm-assess-v1";
-const BUILD = "1.9 · 14 Aug 2026";   // shown in Setup so you can tell builds apart
+const BUILD = "2.0 · 14 Aug 2026";   // shown in Setup so you can tell builds apart
 const AREA_BY_ID = {};
 DATA.areas.forEach(a => { AREA_BY_ID[a.id] = a; });
 const TOTAL_Q = DATA.areas.reduce((n, a) => n + a.questions.length, 0);
@@ -692,6 +693,13 @@ const laneName = l => l === "self" ? "Self assessment" : "External assessment";
                         can hold last year's assessment against this year's.
    The two-series machinery — charts, gaps, tables, report — is identical either
    way; only the labels change, which is why comparison needed no new analytics. */
+/* An edition locked to one assessment is about that assessment and nothing else.
+   Anything cross-lane — the gap filter, the gap jump, the other side's score on a
+   question card, the second column in the CSV — is not merely empty here, it is a
+   reference to an assessment this copy of the app is not for. A restored backup
+   can carry the other side's scores in the file; they stay in the data and out of
+   the interface. */
+const SOLO = !!FIXED_LANE;
 const COMPARING = () => state.type === "comparison";
 /* Consolidating: both assessments held at once, and state.lane says only which
    of them a score typed by the moderator lands in. */
@@ -720,6 +728,10 @@ function lanesInPlay() {
     if (!sa && r.sa != null) sa = true;
     if (!ea && r.ea != null) ea = true;
     if (sa && ea) break;
+  }
+  if (SOLO) {                       // a locked edition has exactly one side, whatever the file holds
+    if (FIXED_LANE === "self") ea = false; else sa = false;
+    return (LANES_CACHE = { sa, ea, only: FIXED_LANE === "self" ? "sa" : "ea", both: false });
   }
   /* Nothing scored yet counts as the lane being worked on, so a titled
      assessment carries its title from the first screen rather than acquiring
@@ -948,7 +960,7 @@ function areaDetailHTML(a) {
     <button class="chip" data-filter="all" aria-pressed="${ui.filter === "all"}">All ${st.n}</button>
     <button class="chip" data-filter="todo" aria-pressed="${ui.filter === "todo"}">Unanswered ${st.n - done}</button>
     <button class="chip" data-filter="done" aria-pressed="${ui.filter === "done"}">Answered ${done}</button>
-    <button class="chip" data-filter="gap" aria-pressed="${ui.filter === "gap"}">Gap &ge; 2</button>
+    ${SOLO ? "" : `<button class="chip" data-filter="gap" aria-pressed="${ui.filter === "gap"}">Gap &ge; 2</button>`}
     ${AVG_IN_AREA(a) ? `<button class="chip" data-filter="avg" aria-pressed="${ui.filter === "avg"}">Averaged ${AVG_IN_AREA(a)}</button>` : ""}
   </div>
   ${nShown === 0
@@ -964,8 +976,12 @@ function areaDetailHTML(a) {
           <span class="nm">${esc(s.name)}</span>
           <span class="cnt">${sdone}/${s.qs.length}</span>
           <span class="dualpair" aria-hidden="true">
-            <span class="${sst.sa != null ? "d1" : "dn"}">${sst.sa != null ? fmt(sst.sa) : "–"}</span>
-            <span class="${sst.ea != null ? "d2" : "dn"}">${sst.ea != null ? fmt(sst.ea) : "–"}</span>
+            ${SOLO
+              ? (() => { const v = FIXED_LANE === "self" ? sst.sa : sst.ea;
+                         const c = FIXED_LANE === "self" ? "d1" : "d2";
+                         return `<span class="${v != null ? c : "dn"}">${v != null ? fmt(v) : "–"}</span>`; })()
+              : `<span class="${sst.sa != null ? "d1" : "dn"}">${sst.sa != null ? fmt(sst.sa) : "–"}</span>
+                 <span class="${sst.ea != null ? "d2" : "dn"}">${sst.ea != null ? fmt(sst.ea) : "–"}</span>`}
           </span>
         </button>
         <div class="subjbody" ${open ? "" : "hidden"}>${s.qs.map(q => qCardHTML(a, q)).join("")}</div>
@@ -993,10 +1009,10 @@ function qCardHTML(a, q) {
     </div>`}
     ${COMPARING() ? "" : `<div class="scalefoot">
       <div class="levelname ${lvl ? "" : "empty"}">${lvl ? esc(mine + " · " + lvl[0]) : "Not yet scored"}</div>
-      ${otherV != null ? `<div class="otherlane"><i class="swatch ${other === "self" ? "sw1" : "sw2"}"></i>${esc(other === "self" ? LBL_A(true) : LBL_B(true))} ${otherV}</div>` : ""}
+      ${(!SOLO && otherV != null) ? `<div class="otherlane"><i class="swatch ${other === "self" ? "sw1" : "sw2"}"></i>${esc(other === "self" ? LBL_A(true) : LBL_B(true))} ${otherV}</div>` : ""}
     </div>`}
     ${myNote ? `<div class="srcline ${isAveraged(a.id, i, state.lane) ? "avg" : ""}">${esc(myNote)}</div>` : ""}
-    ${otherNote ? `<div class="srcline other">${esc(other === "self" ? LBL_A(true) : LBL_B(true))}: ${esc(otherNote)}</div>` : ""}
+    ${(!SOLO && otherNote) ? `<div class="srcline other">${esc(other === "self" ? LBL_A(true) : LBL_B(true))}: ${esc(otherNote)}</div>` : ""}
     <div class="qactions" ${COMPARING() ? "hidden" : ""}>
       <button class="minibtn ${myC ? "on" : ""}" data-act="comment">&#9998; ${myC ? "Edit note" : "Add note"}</button>
       ${mine != null ? `<button class="minibtn" data-act="clear">Clear score</button>` : ""}
@@ -1007,7 +1023,7 @@ function qCardHTML(a, q) {
       <div class="qactions"><button class="minibtn" data-act="savecmt">Save note</button><button class="minibtn" data-act="cancelcmt">Cancel</button></div>
     </div>
     ${myC ? `<div class="savedcmt"><b>${esc(state.lane === "self" ? "Self note" : "External note")}</b>${esc(myC)}</div>` : ""}
-    ${otherC ? `<div class="savedcmt"><b>${esc(other === "self" ? "Self note" : "External note")}</b>${esc(otherC)}</div>` : ""}
+    ${(!SOLO && otherC) ? `<div class="savedcmt"><b>${esc(other === "self" ? "Self note" : "External note")}</b>${esc(otherC)}</div>` : ""}
   </div>`;
 }
 /* ============================================================
@@ -1236,6 +1252,7 @@ function barsSVG(cats, W, slots) {
 const SERIES = { sa: { css: "var(--series-1)", sw: "sw1", lbl: LBL_A },
                  ea: { css: "var(--series-2)", sw: "sw2", lbl: LBL_B } };
 function dashSlots() {
+  if (SOLO) return [FIXED_LANE === "self" ? "sa" : "ea"];   // this edition has one assessment, full stop
   if (COMPARING()) return ["sa", "ea"];          // both expected; an empty slot is worth showing
   const L = lanesInPlay();
   if (L.both) return ["sa", "ea"];
@@ -2006,19 +2023,53 @@ function notesFor(aid, i, lane) {
   return [cmt(aid, i, lane), mergeNote(aid, i, lane)].filter(Boolean).join(" | ");
 }
 function buildCSV() {
-  const A = LBL_A(), B = LBL_B();
-  const rows = [["Client", "Assessment Title", "Consolidated By", "Assessment Area", "Assessment Subject", "Question",
-    A, B, "Gap (" + LBL_B(true) + " - " + LBL_A(true) + ")",
-    A + " Comments", B + " Comments", A + " Assessors", B + " Assessors"]];
+  /* A locked edition exports its own assessment. Columns headed for the other one,
+     with nothing under them, invite the reader to conclude it scored zero. */
+  const lanes = SOLO ? [FIXED_LANE] : ["self", "external"];
+  const label = lane => lane === "self" ? LBL_A() : LBL_B();
+  const head = ["Client", "Assessment Title", SOLO ? "Assessor" : "Consolidated By",
+                "Assessment Area", "Assessment Subject", "Question"];
+  lanes.forEach(l => head.push(label(l)));
+  if (!SOLO) head.push("Gap (" + LBL_B(true) + " - " + LBL_A(true) + ")");
+  lanes.forEach(l => head.push(label(l) + " Comments"));
+  lanes.forEach(l => head.push(label(l) + " Assessors"));
+  const rows = [head];
+
   DATA.areas.forEach(a => a.questions.forEach((q, i) => {
-    const s = val(a.id, i, "self"), e = val(a.id, i, "external");
+    const v = lane => val(a.id, i, lane);
     const who = lane => srcOf(a.id, i, lane).map(c => c.by + " " + c.v).join("; ");
-    rows.push([state.client, state.title, state.assessor, a.name, q.subject, q.q,
-      s == null ? "" : s, e == null ? "" : e, (s != null && e != null) ? Math.round((e - s) * 10) / 10 : "",
-      notesFor(a.id, i, "self"), notesFor(a.id, i, "external"), who("self"), who("external")]);
+    const row = [state.client, state.title, state.assessor, a.name, q.subject, q.q];
+    lanes.forEach(l => row.push(v(l) == null ? "" : v(l)));
+    if (!SOLO) {
+      const s = v("self"), e = v("external");
+      row.push((s != null && e != null) ? Math.round((e - s) * 10) / 10 : "");
+    }
+    lanes.forEach(l => row.push(notesFor(a.id, i, l)));
+    lanes.forEach(l => row.push(who(l)));
+    rows.push(row);
   }));
   return "﻿" + rows.map(r => r.map(csvCell).join(",")).join("\r\n");
 }
+/* What a locked edition puts in its file: its own assessment. Scores for the other
+   side can only have arrived by restoring somebody else's backup into this copy,
+   and passing them on would credit this assessor with answers they never gave —
+   the consolidator would merge them, in their name, into an assessment they were
+   not asked to do. The other side's data stays on the device; it just does not
+   travel. Any other edition exports its state as it stands. */
+function exportState() {
+  if (!SOLO) return state;
+  const keep = FIXED_LANE === "self";
+  const out = Object.assign({}, state, { responses: {} });
+  Object.keys(state.responses).forEach(k => {
+    const r = state.responses[k] || {};
+    const mine = keep
+      ? { sa: r.sa, ea: null, sac: r.sac || "", eac: "", saSrc: r.saSrc, saMean: r.saMean, saManual: r.saManual }
+      : { sa: null, ea: r.ea, sac: "", eac: r.eac || "", eaSrc: r.eaSrc, eaMean: r.eaMean, eaManual: r.eaManual };
+    if (mine.sa != null || mine.ea != null || mine.sac || mine.eac) out.responses[k] = mine;
+  });
+  return out;
+}
+
 /* Empty fields are dropped rather than slugged to a placeholder word. */
 function nameParts(prefix) {
   const parts = [prefix];
@@ -2445,6 +2496,8 @@ function chrome() {
   const inArea = ui.tab === "assess" && ui.area, inDashArea = false;
   $("#backBtn").hidden = !(inArea || inDashArea);
   $("#fabrow").hidden = !inArea;
+  /* Jumping to the biggest self-vs-external divergence needs two assessments. */
+  $("#fabPrev").hidden = SOLO;
   document.body.classList.toggle("has-fab", !!inArea);
   const t = $("#title"), s = $("#subtitle");
   if (inArea) { t.textContent = AREA_BY_ID[ui.area].name; s.textContent = laneName(state.lane) + " · " + (state.client || "no client"); }
@@ -2686,7 +2739,7 @@ function handleAct(act, el) {
   if (act === "csv") { download(buildCSV(), reportName("csv"), "text/csv;charset=utf-8"); return; }
   if (act === "json") {
     download(JSON.stringify({ app: "cvm-assess", version: 2, build: BUILD, edition: FIXED_LANE || "full",
-      exported: new Date().toISOString(), state }, null, 2),
+      exported: new Date().toISOString(), state: exportState() }, null, 2),
       submissionName(), "application/json");
     return;
   }
