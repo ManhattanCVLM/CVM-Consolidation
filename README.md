@@ -118,10 +118,19 @@ leave merge-capable code recoverable from an earlier commit.
 
 ---
 
+## Licensing
+
+This app is **not** licensed or time-limited — it is your tool, and locking yourself out
+mid-consolidation would help nobody. The three client-facing apps do carry a licence; see
+the `CVM-Assessment` README, and keep `CVM Licence Keys (KEEP PRIVATE).html` off every
+repository.
+
+---
+
 ## Releasing a change
 
 1. Replace `index.html`
-2. **Bump `const CACHE` in `sw.js`** — currently `cvm-consolidate-v7`
+2. **Bump `const CACHE` in `sw.js`** — currently `cvm-consolidate-v9`
 3. Commit and push; Pages redeploys within a minute
 
 Without step 2, a device that already installed it keeps serving its cached copy. Answers
@@ -133,3 +142,8 @@ already on a device survive an update.
 
 **`CVM-Assessment`** — the client app plus the locked Self and External editions that
 assessors use. Nothing in this repository belongs there.
+
+---
+
+© Brooklyn Solutions AI / Manhattan CVLM. All rights reserved. Published here for
+distribution to named clients; not licensed for reuse or redistribution.
