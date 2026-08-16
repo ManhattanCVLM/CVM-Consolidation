@@ -592,7 +592,7 @@ const FIXED_LANE = null;
 const CONSOLIDATOR = /*__CONSOLIDATOR__*/true;
 const KEY = FIXED_LANE ? "cvm-assess-" + FIXED_LANE + "-v1"
           : CONSOLIDATOR ? "cvm-consolidate-v1" : "cvm-assess-v1";
-const BUILD = "2.4 · 15 Aug 2026";   // shown in Setup so you can tell builds apart
+const BUILD = "2.5 · 16 Aug 2026";   // shown in Setup so you can tell builds apart
 
 /* ============================================================
    LICENCE
@@ -619,12 +619,19 @@ const BUILD = "2.4 · 15 Aug 2026";   // shown in Setup so you can tell builds a
    ones can be entered. Nobody's completed work is held hostage over a date.
    ============================================================ */
 const LICENSED = /*__LICENSED__*/false;        // gated builds: the client-facing apps
+/* Two ways a gated build can behave with no key:
+     NEEDS_KEY false  it runs until the build's own date, then goes read-only
+     NEEDS_KEY true   it does nothing until a key arrives
+   The self assessment is the second: a copy that reaches someone who was never
+   given a key should not quietly work for a year. */
+const NEEDS_KEY = /*__NEEDS_KEY__*/false;
 const LIC_PUBKEY = /*__PUBKEY__*/{"key_ops": ["verify"], "ext": true, "kty": "EC", "x": "-eyeBPF3cKnjoSqSEU_u290wZA0mAWFYRpLPdHL5jmw", "y": "EaZmGc1r93sgxX00hQcm2FC38fkt4JqhW2-5aNDf-JA", "crv": "P-256"};         // public half of the signing key
 const BUILD_EXPIRES = /*__BUILD_EXPIRES__*/null;   // backstop for a copy with no key
 const LIC_CONTACT = "Manhattan CVLM";
 
-const LIC = { valid: false, client: "", expires: null, source: "none", expired: false, daysLeft: null };
-const LOCKED = () => LICENSED && LIC.expired;
+const LIC = { valid: false, client: "", expires: null, source: "none",
+              expired: false, unlicensed: false, daysLeft: null };
+const LOCKED = () => LICENSED && (LIC.expired || LIC.unlicensed);
 
 const b64u = {
   toBytes(s) {
@@ -672,10 +679,12 @@ async function refreshLicence() {
     LIC.valid = true; LIC.client = claim.c || ""; LIC.expires = claim.e;
     LIC.source = "key";
   } else {
-    LIC.valid = false; LIC.client = ""; LIC.expires = BUILD_EXPIRES;
-    LIC.source = state.licence ? "bad-key" : (BUILD_EXPIRES ? "build" : "none");
+    LIC.valid = false; LIC.client = "";
+    LIC.expires = NEEDS_KEY ? null : BUILD_EXPIRES;
+    LIC.source = state.licence ? "bad-key" : (NEEDS_KEY ? "needed" : (BUILD_EXPIRES ? "build" : "none"));
   }
   LIC.expired = !!(LIC.expires && today > LIC.expires);
+  LIC.unlicensed = LICENSED && NEEDS_KEY && !LIC.valid;
   LIC.daysLeft = LIC.expires ? daysBetween(today, LIC.expires) : null;
   return LIC;
 }
@@ -762,6 +771,11 @@ const $ = s => document.querySelector(s);
 const esc = s => String(s == null ? "" : s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const resp = (aid, i) => state.responses[aid + "|" + i] || null;
 function setResp(aid, i, patch) {
+  /* The lock belongs to the app, not to one button. Guarding only the tap
+     handler would mean any other route into scoring — a keyboard shortcut, a
+     future screen, the console — quietly ignored the licence. Reads are
+     untouched: everything already recorded stays visible and exportable. */
+  if (LOCKED()) return;
   const k = aid + "|" + i;
   state.responses[k] = Object.assign({ sa: null, ea: null, sac: "", eac: "" }, state.responses[k], patch);
   save();
@@ -770,6 +784,7 @@ function setResp(aid, i, patch) {
 /* A score typed here by the moderator overrides any merged average.
    The contributing scores stay recorded so the audit trail survives. */
 function setScore(aid, i, lane, v) {
+  if (LOCKED()) return;
   const patch = lane === "self" ? { sa: v, saManual: v != null } : { ea: v, eaManual: v != null };
   setResp(aid, i, patch);
 }
@@ -2096,14 +2111,16 @@ function renderMore() {
   ${!LICENSED ? "" : `
   <div class="card">
     <div class="card-title">Licence</div>
-    <div class="licstate ${LIC.expired ? "stop" : (LIC.daysLeft != null && LIC.daysLeft <= 14) ? "warn" : LIC.valid ? "ok" : ""}">
+    <div class="licstate ${(LIC.expired || LIC.unlicensed) ? "stop" : (LIC.daysLeft != null && LIC.daysLeft <= 14) ? "warn" : LIC.valid ? "ok" : ""}">
       <i class="dot"></i>
       <div>
-        <strong>${LIC.expired ? "Ended " + esc(niceDate(LIC.expires))
+        <strong>${LIC.unlicensed ? "Not licensed yet"
+          : LIC.expired ? "Ended " + esc(niceDate(LIC.expires))
           : LIC.expires ? "Runs until " + esc(niceDate(LIC.expires))
           : "No end date"}</strong>
         <span>${LIC.source === "key" ? "Licensed to " + esc(LIC.client || "\u2014")
-          : LIC.source === "bad-key" ? "The key on this device is not valid \u2014 it may have been mistyped, or issued for a different app. Falling back to this copy's own date."
+          : LIC.source === "bad-key" ? "The key on this device could not be verified \u2014 it may have been mistyped, or issued for a different app."
+          : LIC.source === "needed" ? "This assessment is licensed per client. Contact " + esc(LIC_CONTACT) + " for a key, then paste it below."
           : LIC.source === "build" ? "No licence key on this device, so this copy runs to its own built-in date."
           : "This copy has no end date."}${
           LIC.daysLeft != null && !LIC.expired ? " \u00b7 " + LIC.daysLeft + " day" + (LIC.daysLeft === 1 ? "" : "s") + " left" : ""}</span>
@@ -2739,9 +2756,21 @@ function chrome() {
 function licBar() {
   const el = $("#licbar");
   if (!el) return;
-  if (!LICENSED || !LIC.expires || (LIC.daysLeft != null && LIC.daysLeft > 14)) { el.hidden = true; el.innerHTML = ""; return; }
+  if (!LICENSED || (!LIC.unlicensed && (!LIC.expires || (LIC.daysLeft != null && LIC.daysLeft > 14)))) {
+    el.hidden = true; el.innerHTML = ""; return;
+  }
   el.hidden = false;
-  if (LIC.expired) {
+  if (LIC.unlicensed) {
+    el.innerHTML = `<div class="licnote stop">
+      <strong>This assessment needs a licence</strong>
+      ${LIC.source === "bad-key"
+        ? `The key on this device could not be verified. It may have been mistyped or altered in transit \u2014 ask
+           ${esc(LIC_CONTACT)} to send it again.`
+        : `Contact ${esc(LIC_CONTACT)} to obtain a licence key, then enter it under <b>Setup &#8250; Licence</b>.
+           You can read the questions in the meantime; scoring starts once the key is in.`}
+      <div class="licrow"><button class="minibtn" data-act="tolicence">Enter a licence key</button></div>
+    </div>`;
+  } else if (LIC.expired) {
     el.innerHTML = `<div class="licnote stop">
       <strong>This assessment's licence ended on ${esc(niceDate(LIC.expires))}</strong>
       Your answers are safe and can still be exported or reported on \u2014 scoring is switched off.
@@ -2826,6 +2855,7 @@ document.querySelector("main").addEventListener("click", e => {
   }
 
   const cmpLoad = t.closest("[data-cmpload]");
+  if (cmpLoad && LOCKED()) { toast(LIC.unlicensed ? "A licence key is needed first" : "Licence ended \u2014 nothing new can be loaded"); return; }
   if (cmpLoad) { cmpSlot = cmpLoad.dataset.cmpload; $("#cmpIn").click(); return; }
 
   const cmpClear = t.closest("[data-cmpclear]");
@@ -2889,7 +2919,7 @@ document.querySelector("main").addEventListener("click", e => {
 
   const sc = t.closest("[data-score]");
   if (sc) {
-    if (LOCKED()) { toast("Licence ended \u2014 scoring is switched off"); return; }
+    if (LOCKED()) { toast(LIC.unlicensed ? "A licence key is needed before scoring" : "Licence ended \u2014 scoring is switched off"); return; }
     if (advancing()) return;                       // the page is still moving; that tap was meant for elsewhere
     const card = sc.closest(".qcard"), [aid, i] = card.dataset.q.split("|");
     const n = +sc.dataset.score, cur = val(aid, +i, state.lane);
@@ -2980,7 +3010,7 @@ function handleAct(act, el) {
     if (act === "comment") { const w = card.querySelector(".cmtwrap"); w.hidden = !w.hidden; if (!w.hidden) card.querySelector("textarea").focus(); return; }
     if (act === "cancelcmt") { card.querySelector(".cmtwrap").hidden = true; return; }
     if (LOCKED() && (act === "savecmt" || act === "clear" || act === "comment")) {
-      toast("Licence ended \u2014 this assessment is read-only"); return;
+      toast(LIC.unlicensed ? "A licence key is needed first" : "Licence ended \u2014 this assessment is read-only"); return;
     }
     if (act === "savecmt") {
       const txt = card.querySelector("textarea").value.trim();
@@ -3031,7 +3061,7 @@ function handleAct(act, el) {
     return;
   }
   if (LOCKED() && (act === "import" || act === "merge" || act === "reseed" || act === "blank")) {
-    toast("Licence ended \u2014 nothing new can be loaded"); return;
+    toast(LIC.unlicensed ? "A licence key is needed first" : "Licence ended \u2014 nothing new can be loaded"); return;
   }
   if (act === "import") { $("#fileIn").click(); return; }
   if (act === "merge") { if (CONSOLIDATOR) $("#mergeIn").click(); return; }

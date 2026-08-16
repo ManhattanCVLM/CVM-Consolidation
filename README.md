@@ -130,7 +130,7 @@ repository.
 ## Releasing a change
 
 1. Replace `index.html`
-2. **Bump `const CACHE` in `sw.js`** — currently `cvm-consolidate-v9`
+2. **Bump `const CACHE` in `sw.js`** — currently `cvm-consolidate-v10`
 3. Commit and push; Pages redeploys within a minute
 
 Without step 2, a device that already installed it keeps serving its cached copy. Answers
