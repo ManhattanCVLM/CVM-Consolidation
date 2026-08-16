@@ -329,8 +329,8 @@ svg.barchart{align-self:stretch}
 .checkrow small{display:block;font-size:12px;font-weight:400;color:var(--text-muted);margin-top:2px}
 
 /* ---------- licence ---------- */
-#licbar{margin:0 0 12px}
-#licbar[hidden]{display:none}
+#licbar,#updbar{margin:0 0 12px}
+#licbar[hidden],#updbar[hidden]{display:none}
 .licnote{border-radius:var(--radius);padding:11px 13px;font-size:13px;line-height:1.45;
   border:1px solid var(--border-strong);background:var(--surface-1)}
 .licnote strong{display:block;font-size:14px;font-weight:680;margin-bottom:2px}
@@ -531,6 +531,7 @@ body.sheet-open{overflow:hidden}
   <!-- Licence notice: expiry, or the fortnight before it. Above the views so it
        appears on every screen without each one having to remember it. -->
   <div id="licbar" hidden></div>
+  <div id="updbar" hidden></div>
 
   <main>
     <section class="view" id="view-assess"></section>
@@ -592,7 +593,7 @@ const FIXED_LANE = null;
 const CONSOLIDATOR = /*__CONSOLIDATOR__*/true;
 const KEY = FIXED_LANE ? "cvm-assess-" + FIXED_LANE + "-v1"
           : CONSOLIDATOR ? "cvm-consolidate-v1" : "cvm-assess-v1";
-const BUILD = "2.5 · 16 Aug 2026";   // shown in Setup so you can tell builds apart
+const BUILD = "2.6 · 16 Aug 2026";   // shown in Setup so you can tell builds apart
 
 /* ============================================================
    LICENCE
@@ -2738,6 +2739,7 @@ function chrome() {
   $("#backBtn").hidden = !(inArea || inDashArea);
   $("#fabrow").hidden = !inArea;
   licBar();
+  updateBar();
   document.body.classList.toggle("has-fab", !!inArea);
   const t = $("#title"), s = $("#subtitle");
   if (inArea) { t.textContent = AREA_BY_ID[ui.area].name; s.textContent = laneName(state.lane) + " · " + (state.client || "no client"); }
@@ -2753,6 +2755,23 @@ function chrome() {
 /* Shown when the licence has run out, and for the fortnight before it. Silent
    otherwise: an app that reminds you it is licensed on every screen for a year
    is nagging, not informing. */
+/* Set when a newer version has installed alongside this one. The page keeps
+   working; the notice offers the swap rather than yanking the ground away
+   mid-question. */
+let updateReady = null;
+
+function updateBar() {
+  const el = $("#updbar");
+  if (!el) return;
+  if (!updateReady) { el.hidden = true; el.innerHTML = ""; return; }
+  el.hidden = false;
+  el.innerHTML = `<div class="licnote">
+    <strong>A new version is ready</strong>
+    Your answers are saved and will still be here afterwards.
+    <div class="licrow"><button class="minibtn" data-act="doupdate">Reload now</button></div>
+  </div>`;
+}
+
 function licBar() {
   const el = $("#licbar");
   if (!el) return;
@@ -2841,6 +2860,20 @@ function gotoQuestion(aid, i) {
     if (el) { el.scrollIntoView({ block: "center", behavior: "smooth" }); el.style.outline = "2px solid var(--accent)"; el.style.outlineOffset = "2px"; setTimeout(() => { el.style.outline = ""; }, 1600); }
   });
 }
+
+/* The licence and update notices sit ABOVE <main> so they show on every screen,
+   which put their buttons outside the delegated click listener below — they
+   looked like buttons and did nothing. Route them to the same handler rather
+   than widening the main listener to the whole document, which would start
+   catching the tab bar and header that have handlers of their own. */
+["#licbar", "#updbar"].forEach(sel => {
+  const el = document.querySelector(sel);
+  if (!el) return;
+  el.addEventListener("click", e => {
+    const act = e.target.closest("[data-act]");
+    if (act) handleAct(act.dataset.act, act);
+  });
+});
 
 document.querySelector("main").addEventListener("click", e => {
   const t = e.target;
@@ -3038,6 +3071,11 @@ function handleAct(act, el) {
     download(JSON.stringify({ app: "cvm-assess", version: 2, build: BUILD, edition: FIXED_LANE || "full",
       exported: new Date().toISOString(), state: exportState() }, null, 2),
       submissionName(), "application/json");
+    return;
+  }
+  if (act === "doupdate") {
+    if (updateReady) { updateReady.postMessage({ type: "SKIP_WAITING" }); toast("Updating\u2026"); }
+    else location.reload();
     return;
   }
   if (act === "tolicence") { ui.tab = "more"; render(); toast("Paste the key here"); return; }

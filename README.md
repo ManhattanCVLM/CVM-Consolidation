@@ -127,10 +127,38 @@ repository.
 
 ---
 
+## How an update reaches people
+
+**The page is fetched from the network first**, with the cached copy as the fallback. So a
+reload with any signal at all lands on the current version — one reload, not two — and the
+app still opens instantly with no network.
+
+That is a change from how it worked up to build 2.5, which served the cached copy every
+time and fetched the new one quietly for next time. The first visit after an update showed
+the old app, which reads exactly like the update having failed.
+
+**A release made while somebody has the app open** shows them *"A new version is ready"*
+with a Reload now button. Nothing is swapped underneath them mid-question, and their
+answers survive either way.
+
+**Installed copies check on every open**, and the worker script itself is exempt from the
+browser's HTTP cache (`updateViaCache: "none"`), so a new release cannot sit unnoticed
+behind a stale copy of `sw.js`.
+
+To release: replace `index.html`, **bump `const CACHE` in `sw.js`**, commit. Without the
+bump, devices keep the assets they cached — the page will be current but its icons and
+manifest will not.
+
+If a device is somehow still stuck: in the browser, clear site data for the URL; on a
+home-screen install, delete the icon and add it again. Answers live in the browser's
+storage for that origin and survive the first; the second clears them, so export first.
+
+---
+
 ## Releasing a change
 
 1. Replace `index.html`
-2. **Bump `const CACHE` in `sw.js`** — currently `cvm-consolidate-v10`
+2. **Bump `const CACHE` in `sw.js`** — currently `cvm-consolidate-v11`
 3. Commit and push; Pages redeploys within a minute
 
 Without step 2, a device that already installed it keeps serving its cached copy. Answers
