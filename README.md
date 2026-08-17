@@ -145,6 +145,11 @@ answers survive either way.
 browser's HTTP cache (`updateViaCache: "none"`), so a new release cannot sit unnoticed
 behind a stale copy of `sw.js`.
 
+**If the site is ever switched off** — Pages turned off, the repository made private on a
+free plan, a deploy that fails — an installed copy keeps working from its cache. The worker
+treats a 404 or a 500 as a failed fetch, not as the app, so a hosting error never replaces
+a working install. New visitors get nothing, of course.
+
 To release: replace `index.html`, **bump `const CACHE` in `sw.js`**, commit. Without the
 bump, devices keep the assets they cached — the page will be current but its icons and
 manifest will not.
@@ -158,7 +163,7 @@ storage for that origin and survive the first; the second clears them, so export
 ## Releasing a change
 
 1. Replace `index.html`
-2. **Bump `const CACHE` in `sw.js`** — currently `cvm-consolidate-v11`
+2. **Bump `const CACHE` in `sw.js`** — currently `cvm-consolidate-v13`
 3. Commit and push; Pages redeploys within a minute
 
 Without step 2, a device that already installed it keeps serving its cached copy. Answers

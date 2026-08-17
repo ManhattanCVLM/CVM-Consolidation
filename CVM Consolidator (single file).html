@@ -328,6 +328,18 @@ svg.barchart{align-self:stretch}
 .checkrow span{font-size:14px;font-weight:600;line-height:1.35}
 .checkrow small{display:block;font-size:12px;font-weight:400;color:var(--text-muted);margin-top:2px}
 
+/* ---------- the licence gate ---------- */
+#gate{max-width:520px;margin:0 auto;padding:8px 2px 40px}
+#gate[hidden]{display:none}
+#gate .glogo{display:block;max-width:210px;margin:14px auto 20px}
+#gate h2{font-size:20px;font-weight:680;letter-spacing:-.015em;margin:0 0 6px;text-align:center}
+#gate .gsub{font-size:13.5px;color:var(--text-secondary);line-height:1.5;text-align:center;margin:0 auto 22px;max-width:400px}
+#gate .gcard{background:var(--surface-1);border:1px solid var(--border);border-radius:var(--radius);
+  box-shadow:var(--shadow);padding:16px}
+#gate label{display:block;font-size:11.5px;font-weight:650;letter-spacing:.05em;text-transform:uppercase;
+  color:var(--text-muted);margin-bottom:6px}
+#gate .gfoot{font-size:12px;color:var(--text-muted);line-height:1.5;margin-top:16px;text-align:center}
+
 /* ---------- licence ---------- */
 #licbar,#updbar{margin:0 0 12px}
 #licbar[hidden],#updbar[hidden]{display:none}
@@ -533,6 +545,11 @@ body.sheet-open{overflow:hidden}
   <div id="licbar" hidden></div>
   <div id="updbar" hidden></div>
 
+  <!-- Shown instead of the app when there is no licence and nothing to rescue:
+       the questions are the product, and a URL on its own should not hand them
+       over. -->
+  <div id="gate" hidden></div>
+
   <main>
     <section class="view" id="view-assess"></section>
     <section class="view" id="view-dash" hidden></section>
@@ -593,7 +610,7 @@ const FIXED_LANE = null;
 const CONSOLIDATOR = /*__CONSOLIDATOR__*/true;
 const KEY = FIXED_LANE ? "cvm-assess-" + FIXED_LANE + "-v1"
           : CONSOLIDATOR ? "cvm-consolidate-v1" : "cvm-assess-v1";
-const BUILD = "2.6 · 16 Aug 2026";   // shown in Setup so you can tell builds apart
+const BUILD = "3.0 · 16 Aug 2026";   // shown in Setup so you can tell builds apart
 
 /* ============================================================
    LICENCE
@@ -673,8 +690,45 @@ async function verifyKey(key) {
 
 /* Sets LIC from whatever governs this copy: a valid key if there is one, the
    build's own date if not. */
+/* A key can travel in the link, after the # so it never reaches the server or
+   its logs: .../CVM-Assessment-Self/#lic=CVM1.… — one link to send, nothing for
+   the client to paste. It is verified like any other key, stored, and wiped from
+   the address bar so it is not left sitting in a screenshot or a shared tab. */
+const urlKey = (() => {
+  try {
+    const m = (location.hash + "&" + location.search).match(/[#?&]lic=([A-Za-z0-9._~%-]+)/);
+    return m ? decodeURIComponent(m[1]) : "";
+  } catch (e) { return ""; }
+})();
+function scrubUrl() {
+  try {
+    if (!urlKey) return;
+    history.replaceState(null, "", location.pathname);
+  } catch (e) { /* file:// or blocked */ }
+}
+
+/* Is there anything on this device worth getting back out? Someone whose key has
+   lapsed must always be able to reach their own answers; someone who has never
+   had one has nothing to reach. */
+function anyScores() {
+  for (const k in state.responses) {
+    const r = state.responses[k];
+    if (r && (r.sa != null || r.ea != null)) return true;
+  }
+  return false;
+}
+
 async function refreshLicence() {
   const today = todayISO();
+  /* A key in the link wins over whatever is stored: it is how a renewal arrives. */
+  if (urlKey && urlKey !== state.licence && await verifyKey(urlKey)) {
+    state.licence = urlKey;
+    /* Written straight through rather than through the debounce: a key that
+       arrived in a link has to survive whatever happens in the next 200ms,
+       including a reload. */
+    try { store.set(JSON.stringify(state)); } catch (e) { save(); }
+  }
+  scrubUrl();
   const claim = await verifyKey(state.licence);
   if (claim) {
     LIC.valid = true; LIC.client = claim.c || ""; LIC.expires = claim.e;
@@ -2751,6 +2805,45 @@ function chrome() {
     if (b.dataset.tab === ui.tab) b.setAttribute("aria-current", "page"); else b.removeAttribute("aria-current");
   });
   ["assess", "dash", "more"].forEach(k => { $("#view-" + k).hidden = ui.tab !== k; });
+  gate();
+}
+
+/* ---------- the gate ----------
+   With no licence and nothing on the device to rescue, the app shows a key
+   prompt and nothing else. The 350 questions are the product; a URL on its own
+   should not hand them over, and "unlisted" is not a control.
+
+   Not shown to someone whose key has simply lapsed, or who has answers here
+   already — they see the read-only app so they can always reach their own work.
+   Locking somebody out of their own assessment to make a point about licensing
+   would be indefensible. */
+function gated() { return LICENSED && LIC.unlicensed && !anyScores(); }
+
+function gate() {
+  const g = $("#gate");
+  if (!g) return;
+  const on = gated();
+  g.hidden = !on;
+  document.querySelector("main").hidden = on;
+  $("#tabbar").hidden = on;
+  if (on) { $("#fabrow").hidden = true; $("#licbar").hidden = true; }
+  if (!on) { g.innerHTML = ""; return; }
+  if (g.dataset.built === "1") return;        // don't wipe what they are typing
+  g.dataset.built = "1";
+  g.innerHTML = `
+    ${LOGO ? `<img class="glogo" src="${LOGO}" alt="Manhattan CVLM">` : ""}
+    <h2>${esc(FIXED_LANE ? laneName(FIXED_LANE) : "CVM Maturity Assessment")}</h2>
+    <div class="gsub">This assessment is licensed to named clients. Enter the licence key you were sent to
+      begin${LIC.source === "bad-key" ? ", or ask for a replacement — the key on this device could not be verified" : ""}.</div>
+    <div class="gcard">
+      <label for="fLicence">Licence key</label>
+      <textarea class="lickey" id="fLicence" placeholder="CVM1.\u2026" spellcheck="false" autocapitalize="none"></textarea>
+      <div class="btnrow" style="margin-top:10px">
+        <button class="bigbtn primary" data-act="licapply">Unlock this assessment</button>
+      </div>
+    </div>
+    <div class="gfoot">Don't have a key? Contact ${esc(LIC_CONTACT)}.<br>
+      Nothing here is sent anywhere: your answers stay on this device.</div>`;
 }
 /* Shown when the licence has run out, and for the fortnight before it. Silent
    otherwise: an app that reminds you it is licensed on every screen for a year
@@ -2866,7 +2959,7 @@ function gotoQuestion(aid, i) {
    looked like buttons and did nothing. Route them to the same handler rather
    than widening the main listener to the whole document, which would start
    catching the tab bar and header that have handlers of their own. */
-["#licbar", "#updbar"].forEach(sel => {
+["#licbar", "#updbar", "#gate"].forEach(sel => {
   const el = document.querySelector(sel);
   if (!el) return;
   el.addEventListener("click", e => {
@@ -3074,6 +3167,7 @@ function handleAct(act, el) {
     return;
   }
   if (act === "doupdate") {
+    window.__cvmWantsReload = true;          // the swap below is now expected, not a surprise
     if (updateReady) { updateReady.postMessage({ type: "SKIP_WAITING" }); toast("Updating\u2026"); }
     else location.reload();
     return;
@@ -3085,6 +3179,7 @@ function handleAct(act, el) {
     verifyKey(key).then(claim => {
       if (!claim) { toast("That key is not valid"); return; }
       state.licence = key; save();
+      const g = $("#gate"); if (g) g.dataset.built = "";
       refreshLicence().then(() => {
         render();
         toast(LIC.expired ? "That key ended on " + niceDate(LIC.expires)

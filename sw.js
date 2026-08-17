@@ -14,7 +14,7 @@
    change, and they change with the cache name when they do.
 
    Bump CACHE whenever index.html changes. */
-const CACHE = "cvm-consolidate-v11";
+const CACHE = "cvm-consolidate-v13";
 const ASSETS = [
   "./",
   "./index.html",
@@ -68,8 +68,17 @@ self.addEventListener("fetch", event => {
         fetch(req)
           .then(res => {
             clearTimeout(timer);
-            if (res && res.ok) caches.open(CACHE).then(c => c.put("./index.html", res.clone()));
-            done(res);
+            /* A 404 or a 500 is a reply, not an app. Handing it straight over
+               would replace a working installed copy with a hosting error page —
+               which is what a deploy blip, or the site being taken down, looks
+               like from the device. Only a good response wins; anything else
+               falls back to the copy that is already here. */
+            if (res && res.ok) {
+              caches.open(CACHE).then(c => c.put("./index.html", res.clone()));
+              done(res);
+            } else {
+              cached(req).then(hit => done(hit || res));
+            }
           })
           .catch(() => { clearTimeout(timer); cached(req).then(done); });
       })
