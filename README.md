@@ -46,13 +46,12 @@ reason casual discovery is unlikely.
 index.html                the consolidator, hosted build
 sw.js  manifest.webmanifest  icon-*.png  .nojekyll     offline install
 CVM Consolidator (single file).html                    one file, for a laptop or email
-xcode-project/            the native iOS app, which bundles the consolidator
 MULTI-ASSESSOR-WORKFLOW.md   collecting submissions, and the merge rules in full
 ```
 
 ---
 
-## Three ways to run it
+## Two ways to run it
 
 **Hosted** — open the Pages URL, then Share → Add to Home Screen. It installs as its own
 app with its own navy icon and runs offline from then on.
@@ -60,13 +59,8 @@ app with its own navy icon and runs offline from then on.
 **One file** — open `CVM Consolidator (single file).html` in any browser. No server, no
 install, no build step. Email it to yourself and it still works.
 
-**Native on the iPhone** — build `xcode-project/` and run it to your phone. **That project
-bundles the consolidator, not the client app** — signed to your device alone and never
-distributed.
-
-Don't install the client app over the native consolidator: they share a bundle identifier
-and would replace each other. The hosted editions have no such problem — each installs
-separately.
+Each app installs separately, so the consolidator and the client editions can sit side by
+side on one device without replacing each other.
 
 Every edition holds its answers under a storage key of its own
 (`cvm-consolidate-v1` here), so the consolidator's working data never mixes with the
@@ -163,7 +157,7 @@ storage for that origin and survive the first; the second clears them, so export
 ## Releasing a change
 
 1. Replace `index.html`
-2. **Bump `const CACHE` in `sw.js`** — currently `cvm-consolidate-v13`
+2. **Bump `const CACHE` in `sw.js`** — currently `cvm-consolidate-v15`
 3. Commit and push; Pages redeploys within a minute
 
 Without step 2, a device that already installed it keeps serving its cached copy. Answers

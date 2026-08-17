@@ -14,7 +14,7 @@
    change, and they change with the cache name when they do.
 
    Bump CACHE whenever index.html changes. */
-const CACHE = "cvm-consolidate-v13";
+const CACHE = "cvm-consolidate-v15";
 const ASSETS = [
   "./",
   "./index.html",
@@ -49,44 +49,60 @@ self.addEventListener("message", event => {
   if (event.data && event.data.type === "SKIP_WAITING") self.skipWaiting();
 });
 
-function cached(req) {
-  return caches.match(req, { ignoreSearch: true })
-    .then(hit => hit || caches.match("./index.html"));
+/* Which URL is the app itself. Everything else in this folder — a checker page,
+   a note, anything added later — is an ordinary page and must be treated as one.
+
+   Getting this wrong caused two faults worth naming. Any successful navigation
+   was being stored AS index.html, so opening a sibling page replaced the cached
+   app with that page. And any path the server did not have fell back to serving
+   index.html, so a missing or mistyped URL silently opened the assessment
+   instead of saying "not found" — which is what made a checker page that had not
+   been uploaded yet look as though it opened the assessment. */
+const SCOPE_PATH = (() => {
+  try { return new URL(self.registration.scope).pathname; } catch (e) { return "/"; }
+})();
+const isAppPage = url => {
+  try {
+    const p = new URL(url).pathname;
+    return p === SCOPE_PATH || p === SCOPE_PATH + "index.html";
+  } catch (e) { return false; }
+};
+
+/* Newest wins, with what is already here as the safety net. */
+function networkFirst(req, cacheAs) {
+  return new Promise(resolve => {
+    let settled = false;
+    const done = r => { if (!settled) { settled = true; resolve(r); } };
+    const fallback = () => caches.match(cacheAs || req, { ignoreSearch: true }).then(hit => hit || null);
+    const timer = setTimeout(() => fallback().then(hit => { if (hit) done(hit); }), PAGE_TIMEOUT);
+    fetch(req)
+      .then(res => {
+        clearTimeout(timer);
+        if (res && res.ok) {
+          const copy = res.clone();
+          caches.open(CACHE).then(c => c.put(cacheAs || req, copy));
+          done(res);
+        } else {
+          /* A 404 or a 500 is a reply, not an app. Prefer the copy of THIS page if
+             there is one; otherwise pass the server's answer through honestly. */
+          fallback().then(hit => done(hit || res));
+        }
+      })
+      .catch(() => { clearTimeout(timer); fallback().then(hit => done(hit || Response.error())); });
+  });
 }
 
 self.addEventListener("fetch", event => {
   const req = event.request;
   if (req.method !== "GET" || new URL(req.url).origin !== self.location.origin) return;
 
-  // The page: newest wins, with the cache as the safety net.
-  if (req.mode === "navigate" || (req.destination === "document")) {
-    event.respondWith(
-      new Promise(resolve => {
-        let settled = false;
-        const done = r => { if (!settled) { settled = true; resolve(r); } };
-        const timer = setTimeout(() => cached(req).then(done), PAGE_TIMEOUT);
-        fetch(req)
-          .then(res => {
-            clearTimeout(timer);
-            /* A 404 or a 500 is a reply, not an app. Handing it straight over
-               would replace a working installed copy with a hosting error page —
-               which is what a deploy blip, or the site being taken down, looks
-               like from the device. Only a good response wins; anything else
-               falls back to the copy that is already here. */
-            if (res && res.ok) {
-              caches.open(CACHE).then(c => c.put("./index.html", res.clone()));
-              done(res);
-            } else {
-              cached(req).then(hit => done(hit || res));
-            }
-          })
-          .catch(() => { clearTimeout(timer); cached(req).then(done); });
-      })
-    );
+  if (req.mode === "navigate" || req.destination === "document") {
+    // The app keeps its canonical cache entry; any other page caches under its own URL.
+    event.respondWith(networkFirst(req, isAppPage(req.url) ? "./index.html" : null));
     return;
   }
 
-  // Everything else: instant from cache, refreshed quietly for next time.
+  // Assets: instant from cache, refreshed quietly for next time.
   event.respondWith(
     caches.match(req, { ignoreSearch: true }).then(hit => {
       if (hit) {
@@ -95,15 +111,15 @@ self.addEventListener("fetch", event => {
         }).catch(() => {});
         return hit;
       }
-      return fetch(req)
-        .then(res => {
-          if (res && res.ok) {
-            const copy = res.clone();
-            caches.open(CACHE).then(c => c.put(req, copy));
-          }
-          return res;
-        })
-        .catch(() => caches.match("./index.html"));
+      /* No index.html fallback here: handing the app's HTML back in place of a
+         missing icon or script hides the real failure. */
+      return fetch(req).then(res => {
+        if (res && res.ok) {
+          const copy = res.clone();
+          caches.open(CACHE).then(c => c.put(req, copy));
+        }
+        return res;
+      }).catch(() => Response.error());
     })
   );
 });

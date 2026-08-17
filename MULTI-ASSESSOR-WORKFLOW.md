@@ -57,8 +57,8 @@ which sections to do and leave the rest blank. Blanks merge harmlessly.
 
 ## What they send you
 
-**Setup → Export my assessment (JSON)**. One file. It goes through the normal iOS share
-sheet, so AirDrop, Mail or Files all work.
+**Setup → Export my assessment (JSON)**. One file, downloaded like any other — mail it,
+drop it in a shared folder, whatever suits.
 
 That same file is their backup, so it's worth them keeping a copy.
 
@@ -148,21 +148,7 @@ There's a tick-box for an **appendix of all 350 questions** with their scores an
 Off, the report is about 11 pages. On, about 38. Off is usually right for a client;
 on is useful when they want to see the evidence.
 
-On the iPhone the PDF is generated natively and opens the share sheet — mail it straight
-from your phone. In a browser or the installed web app it opens in a new tab and prints,
-so choose **Save as PDF** (which is also the easiest route if you'd rather do the final
-send from your Mac).
+The report opens in a new tab and prints, so choose **Save as PDF** in the print dialog.
+That works the same on Windows, macOS, Android and iOS.
 
 ---
-
-## One caveat I should flag
-
-The merge logic, the report layout and the PDF pagination I tested properly — synthetic
-submissions from seven assessors across both sides at once, checked against hand-computed
-averages, including three-way collisions, re-imports, overrides on each side
-independently, and the two sides not contaminating each other.
-
-The **native PDF generation is new Swift code I could not compile or run**, since there's
-no macOS in my environment. If **Create PDF report** does nothing or errors on the phone,
-that's where the problem is — tell me what it says. The browser route is fully tested, so
-you always have a working path to a PDF in the meantime.

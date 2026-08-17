@@ -612,7 +612,7 @@ const FIXED_LANE = null;
 const CONSOLIDATOR = /*__CONSOLIDATOR__*/true;
 const KEY = FIXED_LANE ? "cvm-assess-" + FIXED_LANE + "-v1"
           : CONSOLIDATOR ? "cvm-consolidate-v1" : "cvm-assess-v1";
-const BUILD = "3.0 · 16 Aug 2026";   // shown in Setup so you can tell builds apart
+const BUILD = "3.2 · 16 Aug 2026";   // shown in Setup so you can tell builds apart
 
 /* ============================================================
    LICENCE
@@ -2213,12 +2213,9 @@ function renderMore() {
   </div>
 
   <div class="card">
-    <div class="card-title">${NATIVE || INSTALLED ? "About this app" : "Add to your home screen"}</div>
+    <div class="card-title">${INSTALLED ? "About this app" : "Add to your home screen"}</div>
     <div class="help">
-      ${NATIVE
-        ? `Running as a native iOS app. Everything works offline &mdash; no server, no account, no network access at all.
-           Exports open the iOS share sheet so you can AirDrop, Mail or save to Files.`
-        : INSTALLED
+      ${INSTALLED
         ? `Installed to your home screen and running full screen. The whole app is cached on the device,
            so it opens with no network &mdash; on a plane, at a client site, anywhere.`
         : `Runs fully offline once installed &mdash; no server, no account. Works in any modern browser;
@@ -2243,7 +2240,7 @@ function renderMore() {
   </div>
   <div style="text-align:center;font-size:11.5px;color:var(--text-muted);padding:6px 0 4px;line-height:1.6">
     ${TOTAL_Q} questions &middot; ${DATA.areas.length} areas &middot; from CVM Maturity Assessment Comparison v1.0<br>
-    <span style="font-variant-numeric:tabular-nums">Build ${BUILD}</span> &middot; ${FIXED_LANE ? esc(laneName(FIXED_LANE)) : CONSOLIDATOR ? (COMPARING() ? "consolidator \u00b7 comparing" : "consolidator") : "client app"} &middot; ${NATIVE ? "native iOS" : INSTALLED ? "installed web app" : "browser"}
+    <span style="font-variant-numeric:tabular-nums">Build ${BUILD}</span> &middot; ${FIXED_LANE ? esc(laneName(FIXED_LANE)) : CONSOLIDATOR ? (COMPARING() ? "consolidator \u00b7 comparing" : "consolidator") : "client app"} &middot; ${INSTALLED ? "installed web app" : "browser"}
   </div>`;
 }
 
@@ -2333,10 +2330,6 @@ const INSTALLED = (() => {
            (window.matchMedia && window.matchMedia("(display-mode: standalone)").matches);
   } catch (e) { return false; }
 })();
-const NATIVE = (() => {
-  try { return !!(window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.cvmExport); }
-  catch (e) { return false; }
-})();
 
 /* ---------- installing, per platform ----------
    Only iOS restricts this to one browser: no browser on an iPhone may install a
@@ -2388,16 +2381,10 @@ function installStepsHTML() {
     <li>Firefox has no install button; the app still runs perfectly as an ordinary page.</li>
   </ol>`;
 }
-function haptic(kind) {
-  try { window.webkit.messageHandlers.cvmHaptic.postMessage(kind || "light"); } catch (e) { /* web: no-op */ }
-}
+/* Was a bridge to the native shell's haptic engine. There is no native shell any
+   more, and the web Vibration API is unsupported on iOS, so scoring is silent. */
+function haptic() { /* no-op */ }
 async function download(text, filename, mime) {
-  if (NATIVE) {
-    try {
-      window.webkit.messageHandlers.cvmExport.postMessage({ name: filename, mime: mime, text: text });
-      return;
-    } catch (e) { /* fall through to web paths */ }
-  }
   const blob = new Blob([text], { type: mime });
   try {
     const file = new File([blob], filename, { type: mime });
@@ -2763,16 +2750,7 @@ function makeReport() {
   const html = buildReportHTML();
   const name = nameParts("cvm-report") + ".pdf";
 
-  // Native app: Swift renders a real PDF and opens the share sheet.
-  try {
-    if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.cvmPdf) {
-      window.webkit.messageHandlers.cvmPdf.postMessage({ name: name, html: html });
-      toast("Building PDF…");
-      return;
-    }
-  } catch (e) { /* fall through */ }
-
-  // Browser / installed web app: open and print, so the user can Save as PDF.
+  // Open and print, so the browser's own Save as PDF does the work.
   const w = window.open("", "_blank");
   if (!w) {
     // Popup blocked — hand over the HTML file instead; it prints from any browser.
@@ -3447,7 +3425,12 @@ if ("serviceWorker" in navigator) {
         if (w) w.addEventListener("statechange", () => { if (w.state === "installed") offer(w); });
       });
       document.addEventListener("visibilitychange", () => {
-        if (!document.hidden) reg.update().catch(() => {});
+        if (!document.hidden) { reg.update().catch(() => {}); return; }
+        /* Leaving the app is the safe moment to let a waiting version take
+           over: nobody is mid-question, and the next open is simply current.
+           Without this a waiting worker could sit there for weeks while the
+           old one kept serving its cached assets. */
+        if (reg.waiting) reg.waiting.postMessage({ type: "SKIP_WAITING" });
       });
     }).catch(() => { /* file:// or unsupported */ });
     /* Reload ONLY when the person asked for it. On a first visit the new
