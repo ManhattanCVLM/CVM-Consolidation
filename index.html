@@ -295,7 +295,12 @@ table.dt td b{font-weight:650}
 .slicer-head{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:9px}
 .slicer-head span{font-size:11.5px;font-weight:650;letter-spacing:.04em;text-transform:uppercase;color:var(--text-muted)}
 .slicer-all{font-variant-numeric:tabular-nums}
+/* The chips scroll horizontally on a phone, which is right there. On a desktop
+   they were still a single non-wrapping row inside a 1080px column, so two of the
+   seven assessment areas sat past the right edge with the scrollbar suppressed —
+   unreachable with a mouse, and clipped mid-word. */
 .slicer .filters{margin-bottom:0}
+@media (min-width:700px){ .slicer .filters{flex-wrap:wrap;overflow-x:visible} }
 .linkbtn{font-size:12.5px;font-weight:650;color:var(--accent);padding:2px 0;min-height:24px}
 
 /* ---------- charts ---------- */
@@ -612,7 +617,8 @@ const FIXED_LANE = null;
 const CONSOLIDATOR = /*__CONSOLIDATOR__*/true;
 const KEY = FIXED_LANE ? "cvm-assess-" + FIXED_LANE + "-v1"
           : CONSOLIDATOR ? "cvm-consolidate-v1" : "cvm-assess-v1";
-const BUILD = "3.3 · 17 Aug 2026";   // shown in Setup so you can tell builds apart
+const BUILD = "3.4 · 18 Aug 2026";   // shown in Setup so you can tell builds apart
+const BUILT = /*__BUILT__*/"2026-08-18";     // ISO date this file was built; a floor under "today"
 
 /* ============================================================
    LICENCE
@@ -663,17 +669,52 @@ const b64u = {
   }
 };
 
+const daysBetween = (a, b) => Math.round((Date.parse(b + "T00:00:00Z") - Date.parse(a + "T00:00:00Z")) / 86400000);
 /* Today, but never earlier than the latest day this device has already seen.
    Winding the clock back is the one bypass cheap enough that people try it by
    accident as much as on purpose. */
+const CLOCK = { suspect: false, reading: "", floor: "" };
 function todayISO() {
   let iso;
   try { iso = new Date().toISOString().slice(0, 10); } catch (e) { iso = "1970-01-01"; }
   const seen = (state && state.seenDate) || "";
-  if (iso > seen) { if (state) { state.seenDate = iso; } return iso; }
-  return seen;
+  /* Two floors under "today", for two different wrong clocks.
+
+     BACKWARDS. A date already recorded here, and the day this file was built —
+     nothing can legitimately run before it was compiled. Without the second, a
+     brand-new install on a machine with a backdated clock could un-expire a
+     licence that has already ended, because there was no seenDate yet to hold it.
+
+     FORWARDS. A laptop that wakes with its clock in 2030 must still read as
+     expired — winding time forward cannot buy anything — but that reading used to
+     be WRITTEN to storage, and since the recorded date only ever moved forwards,
+     every licence read as expired from then on and correcting the clock did not
+     undo it. Recovery meant a new key or wiping the answers. So an implausible
+     reading is used for this session and not kept. */
+  const floor = (BUILT && BUILT > seen) ? BUILT : seen;
+  CLOCK.reading = iso; CLOCK.floor = floor;
+  if (iso > floor) {
+    /* The anchor for "plausible" is the latest date this copy already knows to be
+       in the past: one it has seen, the day its key was issued, or the build date. */
+    let anchor = floor;
+    try {
+      const part = String((state && state.licence) || "").split(".")[1];
+      if (part) {
+        const issued = JSON.parse(new TextDecoder().decode(b64u.toBytes(part))).i;
+        if (issued && issued > anchor) anchor = issued;
+      }
+    } catch (e) { /* unparseable key: the build date still anchors it */ }
+    const plausible = !anchor || daysBetween(anchor, iso) <= 400;
+    CLOCK.suspect = !plausible;
+    if (state && plausible) state.seenDate = iso;
+    return iso;
+  }
+  /* Reading earlier than a floor: a rollback, or a clock that was wrong before and
+     is right now. Either way hold the floor — and say so, because the honest
+     explanation of "your licence has ended" may be "your clock is wrong". */
+  CLOCK.suspect = !!floor && daysBetween(iso, floor) > 2;
+  return floor;
 }
-const daysBetween = (a, b) => Math.round((Date.parse(b + "T00:00:00Z") - Date.parse(a + "T00:00:00Z")) / 86400000);
 
 async function verifyKey(key) {
   if (!key || !LIC_PUBKEY) return null;
@@ -813,14 +854,35 @@ let undoSnapshot = null;     // one-step undo for the last merge
   }
 })();
 let saveTimer = null;
+let lastWritten = "";
 function save() {
   forgetLanes();                 // a score may have just appeared or gone
   clearTimeout(saveTimer);
-  saveTimer = setTimeout(() => store.set(JSON.stringify(state)), 220);
+  saveTimer = setTimeout(() => { lastWritten = JSON.stringify(state); store.set(lastWritten); }, 220);
 }
 
+/* Two tabs on the same edition used to destroy each other's work: save() writes
+   the whole state document, so whichever tab wrote last replaced everything the
+   other had scored, with no warning. Adopting the other tab's document instead
+   means the two converge — the answer that was actually typed most recently
+   wins, rather than the tab that happened to autosave last. */
+try {
+  window.addEventListener("storage", e => {
+    if (e.key !== KEY || !e.newValue || e.newValue === lastWritten) return;
+    try {
+      const s = JSON.parse(e.newValue);
+      if (!s || typeof s !== "object") return;
+      state = Object.assign(state, s);
+      if (FIXED_LANE) { if (state.type !== "comparison") state.type = FIXED_LANE; state.lane = FIXED_LANE; }
+      lastWritten = e.newValue;
+      forgetLanes();
+      if (typeof render === "function") render(true);
+    } catch (err) { /* leave this tab as it is rather than half-adopting */ }
+  });
+} catch (e) { /* no window, or storage events unavailable */ }
+
 /* ---------- ui state ---------- */
-const ui = { tab: "assess", area: null, dashArea: null, filter: "all", query: "", open: {}, showTable: false,
+const ui = { tab: "assess", area: null, filter: "all", query: "", open: {}, showTable: false,
              areaFilter: [], level: "area", pick: null, reportAppendix: false };
 
 /* ---------- helpers ---------- */
@@ -944,7 +1006,9 @@ function seriesLabel(slot, short) {
   const title = (state.title || "").trim();
   if (title && lanesInPlay().only === slot) return short ? trim18(title) : title;
   if (slot === "sa") return short ? "Self" : "Self assessment";
-  return short ? "Ext" : "External assessment";
+  /* "Ext" sat next to "Self" on the dashboard tiles — one whole word beside a
+     developer's abbreviation, on the client's main screen. Eight characters fit. */
+  return short ? "External" : "External assessment";
 }
 
 /* The heading the dashboard and the report put at the top: what am I looking at?
@@ -1011,7 +1075,9 @@ function gapChip(g) {
   if (g == null) return `<span class="gapchip flat">n/a</span>`;
   const r = Math.round(g * 10) / 10;
   if (Math.abs(r) < 0.05) return `<span class="gapchip flat">&#9644; aligned</span>`;
-  const who = COMPARING() ? "B" : "ext";
+  /* Was "ext", or "B" when comparing — a column letter shown to a client. The
+     second series already has a name everywhere else on the screen. */
+  const who = esc(LBL_B(true));
   return r > 0
     ? `<span class="gapchip over">&#9650; ${who} +${r.toFixed(1)}</span>`
     : `<span class="gapchip under">&#9660; ${who} ${r.toFixed(1)}</span>`;
@@ -1146,7 +1212,11 @@ function areaDetailHTML(a) {
         <div style="font-size:14px;font-weight:600">${done}/${st.n} scored &middot; avg ${fmt(state.lane === "self" ? st.sa : st.ea)}</div>
         <div style="font-size:12.5px;color:var(--text-muted);margin-top:2px">${subs.length} subject areas</div>
       </div>
-      ${st.both ? gapChip(st.gap) : ""}
+      ${/* A gap is a statement about two assessments. A locked edition is about one,
+           and a restored backup can carry the other side's scores in the file — so
+           st.both can be true here in the Self app, and the chip named the other
+           kind. The data stays; the chip does not. */""}
+      ${(st.both && !SOLO_UI()) ? gapChip(st.gap) : ""}
     </div>
   </div>
   <div class="searchwrap">
@@ -1219,8 +1289,12 @@ function qCardHTML(a, q) {
       <textarea data-cmt placeholder="Evidence, rationale, objectives…">${esc(myC)}</textarea>
       <div class="qactions"><button class="minibtn" data-act="savecmt">Save note</button><button class="minibtn" data-act="cancelcmt">Cancel</button></div>
     </div>
-    ${myC ? `<div class="savedcmt"><b>${esc(state.lane === "self" ? "Self note" : "External note")}</b>${esc(myC)}</div>` : ""}
-    ${(!SOLO_UI() && otherC) ? `<div class="savedcmt"><b>${esc(other === "self" ? "Self note" : "External note")}</b>${esc(otherC)}</div>` : ""}
+    ${/* Named from the series, like every other label on this card. Hard-coding
+          "Self note" / "External note" here printed both words in the Self
+          edition whenever it was comparing two self assessments — SOLO_UI() is
+          false in comparison mode, so the guard below did not cover it. */""}
+    ${myC ? `<div class="savedcmt"><b>${esc((state.lane === "self" ? LBL_A(true) : LBL_B(true)) + " note")}</b>${esc(myC)}</div>` : ""}
+    ${(!SOLO_UI() && otherC) ? `<div class="savedcmt"><b>${esc((other === "self" ? LBL_A(true) : LBL_B(true)) + " note")}</b>${esc(otherC)}</div>` : ""}
   </div>`;
 }
 /* ============================================================
@@ -1469,7 +1543,7 @@ function dashHeadHTML(o) {
     return `<div class="dashhead">
       <div class="dh-kicker">Comparing two assessments</div>
       <div class="dh-pair">${row(d.a, "sa", "A")}<span class="vs">versus</span>${row(d.b, "ea", "B")}</div>
-      <div class="dh-sub">${d.client ? esc(d.client) + " &middot; " : ""}${o.both} of ${o.n} questions in both</div>
+      <div class="dh-sub">${d.client ? esc(d.client) + " &middot; " : ""}${o.both} of ${o.n} question${o.both === 1 ? "" : "s"} in both</div>
     </div>`;
   }
   const name = d.title || d.client || "Untitled assessment";
@@ -1603,7 +1677,7 @@ function renderDash() {
     ${gaps.length === 0
       ? `<div class="empty"><div class="big">No differences to show</div><div>${COMPARING()
           ? "The two assessments agree on every question scored in both."
-          : "Score the same questions in both lanes to compare them."}</div></div>`
+          : `Score the same questions in both ${esc(LBL_A(true))} and ${esc(LBL_B(true))} to compare them.`}</div></div>`
       : `<div class="card-note">Questions where the two assessments diverge most. Tap to open the question.</div>
          <div class="gaplist">${gaps.map(x => `<button class="gapitem" style="text-align:left;width:100%;background:none" data-goto="${x.aid}|${x.i}">
            <div class="txt"><div class="q">${esc(x.q)}</div><div class="a">${esc(x.area)} &middot; ${esc(x.subj)} &middot; ${esc(LBL_A(true))} ${x.s} / ${esc(LBL_B(true))} ${x.e}</div></div>
@@ -1914,7 +1988,7 @@ function importSheetHTML() {
       </div>` : ""}
     </div>
     <div class="sheet-foot">
-      <div class="tally">This import adds <b>${totalSelf}</b> self and <b>${totalExt}</b> external answers.</div>
+      <div class="tally">This import adds <b>${totalSelf}</b> self and <b>${totalExt}</b> external answer${(totalSelf + totalExt) === 1 ? "" : "s"}.</div>
       <div class="sheet-actions">
         <button class="bigbtn" data-import="cancel">Cancel</button>
         <button class="bigbtn primary" data-import="go" ${good.length ? "" : "disabled"}>Import ${good.length || ""}</button>
@@ -2146,7 +2220,7 @@ function renderMore() {
 
   ${(FIXED_LANE && !COMPARING()) ? "" : `
   <div class="card">
-    <div class="card-title">Create PDF Report</div>
+    <div class="card-title">Create PDF report</div>
     <div class="card-note">A complete report: summary, the radar and bar charts, area and subject tables, the largest divergences, and who assessed what.</div>
     <div class="btnrow">
       <button class="bigbtn primary" data-act="report">Create PDF report</button>
@@ -2180,7 +2254,10 @@ function renderMore() {
           : LIC.source === "needed" ? "This assessment is licensed per client. Contact " + esc(LIC_CONTACT) + " for a key, then paste it below."
           : LIC.source === "build" ? "No licence key on this device, so this copy runs to its own built-in date."
           : "This copy has no end date."}${
-          LIC.daysLeft != null && !LIC.expired ? " \u00b7 " + LIC.daysLeft + " day" + (LIC.daysLeft === 1 ? "" : "s") + " left" : ""}</span>
+          /* A key issued for several years produced "26799 days left", which
+             reads like a bug. Past a year the end date above already says it. */
+          LIC.daysLeft != null && !LIC.expired && LIC.daysLeft <= 365
+            ? " \u00b7 " + LIC.daysLeft + " day" + (LIC.daysLeft === 1 ? "" : "s") + " left" : ""}</span>
       </div>
     </div>
     <div class="card-note">A key from ${esc(LIC_CONTACT)} sets who this is licensed to and for how long. Paste it here.</div>
@@ -2193,18 +2270,18 @@ function renderMore() {
 
   <div class="card">
     <div class="card-title">Export &amp; backup</div>
-    <div class="card-note">Send the JSON to whoever is consolidating; it is also your backup. CSV opens in Excel with the same columns as the comparison workbook.</div>
+    <div class="card-note">Send the JSON to whoever is consolidating; it is also your backup. CSV opens in Excel, one row per question with both scores and any notes.</div>
     <div class="btnrow">
       <button class="bigbtn primary" data-act="json">Export my assessment (JSON)</button>
       <button class="bigbtn" data-act="csv">Export CSV for Excel</button>
       <button class="bigbtn" data-act="import">Replace everything from a backup</button>
     </div>
-    <div style="font-size:12px;color:var(--text-muted);margin-top:9px">Replacing overwrites this device's answers entirely. To add someone else's work to your own, use <b>Combine assessments</b> above.</div>
+    <div style="font-size:12px;color:var(--text-muted);margin-top:9px">Replacing overwrites this device's answers entirely.${CONSOLIDATOR ? " To add someone else's work to what is already here, use <b>Import &amp; combine submissions</b> above." : ""}</div>
   </div>
 
   <div class="card">
     <div class="card-title">Maturity scale</div>
-    <div class="card-note">1&ndash;8, as used in the source workbook. Level names are a generic maturity ladder &mdash; tell me your own definitions and they can be swapped in.</div>
+    <div class="card-note">1&ndash;8. The same scale applies to every question, so scores are comparable across areas and subjects.</div>
     <div class="scalelist">
       ${LEVELS.map((L, i) => `<div class="scaleitem">
         <div class="n" style="background:${"color-mix(in srgb,var(--accent) " + [10, 16, 22, 30, 38, 48, 60, 74][i] + "%,transparent)"}">${i + 1}</div>
@@ -2240,7 +2317,7 @@ function renderMore() {
   </div>
   <div style="text-align:center;font-size:11.5px;color:var(--text-muted);padding:6px 0 4px;line-height:1.6">
     ${TOTAL_Q} questions &middot; ${DATA.areas.length} areas &middot; from CVM Maturity Assessment Comparison v1.0<br>
-    <span style="font-variant-numeric:tabular-nums">Build ${BUILD}</span> &middot; ${FIXED_LANE ? esc(laneName(FIXED_LANE)) : CONSOLIDATOR ? (COMPARING() ? "consolidator \u00b7 comparing" : "consolidator") : "client app"} &middot; ${INSTALLED ? "installed web app" : "browser"}
+    <span style="font-variant-numeric:tabular-nums">Build ${BUILD}</span> &middot; ${FIXED_LANE ? esc(laneName(FIXED_LANE)) : CONSOLIDATOR ? (COMPARING() ? "consolidator \u00b7 comparing" : "consolidator") : "self and external"} &middot; ${INSTALLED ? "installed web app" : "browser"}
   </div>`;
 }
 
@@ -2487,8 +2564,12 @@ function buildReportHTML() {
     `<span><i style="background:${k === "sa" ? REPORT_PALETTE.s1 : REPORT_PALETTE.s2}"></i>${esc(SERIES[k].lbl())}</span>`).join("")}</div>`;
   const cells = st => slots.map(k => `<td class="num">${fmt(st[k])}</td>`).join("");
   const areaCats = DATA.areas.map(a => ({ key: a.id, name: a.name, area: a.name, aid: a.id, st: areaStats(a) }));
-  const byWeakest = areaCats.slice().sort((x, y) =>
-    (x.st[primary] == null ? 99 : x.st[primary]) - (y.st[primary] == null ? 99 : y.st[primary]));
+  /* Only areas that actually have a score can be the weakest. Sorting nulls to
+     99 and taking the first three presented unscored areas as findings: a report
+     with nothing scored read "Core Supply Chain (—), Spend Analytics (—) score
+     lowest and are the natural focus for improvement." */
+  const byWeakest = areaCats.filter(c => c.st[primary] != null)
+    .sort((x, y) => x.st[primary] - y.st[primary]);
 
   // charts: fixed widths that suit A4 at ~96dpi with 18mm margins
   const savedPick = ui.pick;
@@ -2619,7 +2700,7 @@ function buildReportHTML() {
   <dl>
     <dt>Report date</dt><dd>${reportDate()}</dd>
     <dt>${COMPARING() ? "Assessments compared" : "Questions assessed"}</dt>
-    <dd>${COMPARING() ? `${esc(LBL_A())} and ${esc(LBL_B())}, ${o.both} questions in both`
+    <dd>${COMPARING() ? `${esc(LBL_A())} and ${esc(LBL_B())}, ${o.both} question${o.both === 1 ? "" : "s"} in both`
         : two ? `${o.saN} self, ${o.eaN} external, of ${TOTAL_Q}`
         : `${primary === "sa" ? o.saN : o.eaN} of ${TOTAL_Q} \u00b7 ${esc(laneName(primary === "sa" ? "self" : "external"))}`}</dd>
     <dt>Contributors</dt><dd>${contributors.length ? contributors.map(c => esc(c.name)).join(", ") : esc(state.assessor || "—")}</dd>
@@ -2640,9 +2721,15 @@ function buildReportHTML() {
       <div class="c">${o.both} of ${TOTAL_Q} comparable</div></div>`}
   </div>
   <p>${!two
-      ? `Overall maturity sits at <b>${fmt(o[primary])} of 8</b> (${levelFor(o[primary])}), across the ${
+      ? ((primary === "sa" ? o.saN : o.eaN) === 0
+        /* "Overall maturity sits at — of 8 (—), across the 0 questions scored"
+           is technically accurate and reads like a broken document. */
+        ? `No questions have been scored yet, so this report has no findings in it. It is the empty shell of the
+           document: the sections, the charts and the scale are all here, and they fill in as the assessment is
+           completed.`
+        : `Overall maturity sits at <b>${fmt(o[primary])} of 8</b> (${levelFor(o[primary])}), across the ${
           primary === "sa" ? o.saN : o.eaN} question${(primary === "sa" ? o.saN : o.eaN) === 1 ? "" : "s"} scored in
-          ${esc(SERIES[primary].lbl())}.`
+          ${esc(SERIES[primary].lbl())}.`)
       : o.gap == null
       ? "Only one of the two assessments has been completed, so no comparison is available yet."
       : COMPARING()
@@ -2660,8 +2747,10 @@ function buildReportHTML() {
         : o.gap < 0
           ? `Overall maturity sits at <b>${fmt(o.ea)} of 8</b> on the external assessment against <b>${fmt(o.sa)}</b> self-assessed. The external view is <b>${fmt(Math.abs(o.gap))} points lower</b>, indicating the organisation rates itself above the evidence available — the gap itself is a finding, since remediation plans built on the self-assessment would start from an optimistic baseline.`
           : `Overall maturity sits at <b>${fmt(o.ea)} of 8</b> on the external assessment against <b>${fmt(o.sa)}</b> self-assessed. The external view is <b>${fmt(o.gap)} points higher</b>, indicating capability that exists but is under-recognised internally — often a sign that good practice is present but not documented or credited.`}</p>
-  <p><b>Weakest areas.</b> ${byWeakest.slice(0, 3).map(c => esc(c.name) + " (" + fmt(c.st[primary]) + ")").join(", ")}
-    score lowest on ${esc(SERIES[primary].lbl())} and are the natural focus for improvement.</p>
+  ${byWeakest.length >= 2
+    ? `<p><b>Weakest areas.</b> ${byWeakest.slice(0, 3).map(c => esc(c.name) + " (" + fmt(c.st[primary]) + ")").join(", ")}
+       score lowest on ${esc(SERIES[primary].lbl())} and are the natural focus for improvement.</p>`
+    : `<p><b>Weakest areas.</b> Too few areas have been scored to rank them. ${TOTAL_Q - (primary === "sa" ? o.saN : o.eaN)} of the ${TOTAL_Q} questions are still unanswered.</p>`}
   ${averaged.length ? `<p><b>Consolidation.</b> ${contributors.length} assessors contributed. ${averaged.length} question${averaged.length === 1 ? " was" : "s were"} answered by more than one assessor; those scores are the average of the contributions, rounded down to the nearest level. The contributing scores are recorded against each question.</p>` : ""}
 </section>
 
@@ -2769,16 +2858,22 @@ function makeReport() {
    RENDER + EVENTS
    ============================================================ */
 function chrome() {
-  const inArea = ui.tab === "assess" && ui.area, inDashArea = false;
-  $("#backBtn").hidden = !(inArea || inDashArea);
+  const inArea = ui.tab === "assess" && ui.area;
+  $("#backBtn").hidden = !inArea;
   $("#fabrow").hidden = !inArea;
   licBar();
   updateBar();
   document.body.classList.toggle("has-fab", !!inArea);
   const t = $("#title"), s = $("#subtitle");
   if (inArea) { t.textContent = AREA_BY_ID[ui.area].name; s.textContent = laneName(state.lane) + " · " + (state.client || "no client"); }
-  else if (inDashArea) { t.textContent = AREA_BY_ID[ui.dashArea].name; s.textContent = "Self vs external by subject"; }
-  else if (ui.tab === "dash") { t.textContent = "Dashboard"; s.textContent = state.client || "Comparison analysis"; }
+  /* Was `state.client || "Comparison analysis"`, which announced a comparison
+     over a single assessment whenever the client field had not been filled in —
+     the ordinary state of a consolidation part-way through being assembled. It
+     names what is loaded now, or says nothing in particular. */
+  else if (ui.tab === "dash") {
+    t.textContent = "Dashboard";
+    s.textContent = (state.client || "").trim() || (state.title || "").trim() || "Scores and charts";
+  }
   else if (ui.tab === "more") { t.textContent = "Setup"; s.textContent = "Details, export, scale"; }
   else { t.textContent = "CVM Maturity"; s.textContent = FIXED_LANE ? laneName(FIXED_LANE) : "Contract Value Management assessment"; }
   document.querySelectorAll("#tabbar button").forEach(b => {
@@ -2865,7 +2960,13 @@ function licBar() {
   } else if (LIC.expired) {
     el.innerHTML = `<div class="licnote stop">
       <strong>This assessment's licence ended on ${esc(niceDate(LIC.expires))}</strong>
-      Your answers are safe and can still be exported or reported on \u2014 scoring is switched off.
+      ${/* The honest explanation of "your licence has ended" is sometimes "your
+           clock is wrong" — a laptop resuming from suspend, or a VM with a skewed
+           host. Say so before they go looking for a new key. */""}
+      ${CLOCK.suspect ? `<b>Before anything else, check the date and time on this device. Its clock reads
+         ${esc(niceDate(CLOCK.reading))}, which does not agree with what this copy already knows. If the clock is
+         wrong, correcting it and reloading may be all that is needed.</b>` : ""}
+      Your answers are safe and can still be exported${(FIXED_LANE && !COMPARING()) ? "" : " or reported on"} \u2014 scoring is switched off.
       Contact ${esc(LIC_CONTACT)} to renew, then paste the new key under <b>Setup &#8250; Licence</b>.
       <div class="licrow"><button class="minibtn" data-act="tolicence">Enter a new key</button>
         <button class="minibtn" data-act="json">Export my assessment</button></div>
@@ -2917,9 +3018,10 @@ $("#tabbar").addEventListener("click", e => {
   const b = e.target.closest("button[data-tab]"); if (!b) return;
   ui.tab = b.dataset.tab; render();
 });
+/* Back only ever exists inside an assessment area — chrome() hides it
+   everywhere else — so there is nothing else for it to back out of. */
 $("#backBtn").addEventListener("click", () => {
-  if (ui.tab === "assess") { ui.area = null; ui.query = ""; ui.filter = "all"; }
-  else ui.dashArea = null;
+  ui.area = null; ui.query = ""; ui.filter = "all";
   render();
 });
 
@@ -3005,7 +3107,7 @@ document.querySelector("main").addEventListener("click", e => {
   }
 
   const openA = t.closest("[data-open-area]");
-  if (openA) { ui.tab = "assess"; ui.area = openA.dataset.openArea; ui.dashArea = null; render(); return; }
+  if (openA) { ui.tab = "assess"; ui.area = openA.dataset.openArea; render(); return; }
 
   const goto = t.closest("[data-goto]");
   if (goto) { const [aid, i] = goto.dataset.goto.split("|"); gotoQuestion(aid, +i); return; }
@@ -3266,8 +3368,11 @@ function loadComparison(slot, file) {
         else { if (b) mine++; if (a) theirs++; }
       });
       if (!mine && theirs) {
-        alert("That file is a " + laneName(FIXED_LANE === "self" ? "external" : "self").toLowerCase() +
-              ".\n\nThis app compares " + laneName(FIXED_LANE).toLowerCase() + "s with each other.");
+        /* This used to name the other kind of assessment outright, with a
+           broken article in front of it. Describe the file by what it is
+           missing instead, which is both correct and says less. */
+        alert("That file has no " + laneName(FIXED_LANE).toLowerCase() + " scores in it." +
+              "\n\nThis app compares " + laneName(FIXED_LANE).toLowerCase() + "s with each other.");
         return;
       }
     }
