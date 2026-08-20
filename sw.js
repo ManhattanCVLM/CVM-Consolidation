@@ -14,7 +14,7 @@
    change, and they change with the cache name when they do.
 
    Bump CACHE whenever index.html changes. */
-const CACHE = "cvm-consolidate-v20";
+const CACHE = "cvm-consolidate-v21";
 const ASSETS = [
   "./",
   "./index.html",

@@ -170,8 +170,19 @@ body.has-fab main{padding-bottom:calc(146px + env(safe-area-inset-bottom))}
 .lane-self .scale button[aria-pressed="true"]{background:var(--series-1)}
 .lane-external .scale button[aria-pressed="true"]{background:var(--series-2)}
 .scalefoot{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-top:9px;font-size:12.5px}
-.levelname{font-weight:600;color:var(--text-primary)}
+.levelname{font-weight:600;color:var(--text-primary);min-width:0}
 .levelname.empty{color:var(--text-muted);font-weight:450}
+/* The definition of the level, under its name. This is the whole point of the
+   change: an assessor choosing 5 should be able to read what 5 means without
+   leaving the question. */
+.leveldef{display:block;font-weight:450;font-size:12px;line-height:1.4;color:var(--text-muted);margin-top:2px;
+  min-height:2.8em}   /* two lines, always: see the note below */
+/* Two lines are reserved whether or not the definition needs both. Without it the
+   card's height follows the length of whichever definition is showing, so
+   correcting a 5 to a 6 moved everything below it by a line — under the thumb of
+   somebody halfway down a subject. A reserved line of whitespace on a wide screen
+   is a much smaller cost than the page moving when you fix a score. */
+.scalefoot .levelname b{font-weight:600}
 .otherlane{color:var(--text-secondary);display:flex;align-items:center;gap:6px;font-size:12px;flex:none}
 .qactions{display:flex;gap:8px;margin-top:11px;flex-wrap:wrap}
 .minibtn{
@@ -458,6 +469,25 @@ body.sheet-open{overflow:hidden}
 }
 
 /* ---------- scale reference / settings ---------- */
+/* The full 1-8 scale, expandable on a question card. Same rows as the Setup
+   card, tightened up because here it sits inside a question rather than being
+   the whole point of the screen. */
+.scalehelp{margin-top:11px;padding:4px 11px;background:var(--surface-0);
+  border:1px solid var(--border);border-radius:var(--radius)}
+.scalehelp .scaleitem{padding:7px 0}
+.scalehelp .scaleitem .d strong{font-size:13px}
+.scalehelp .scaleitem .d span{font-size:12px}
+/* The chosen level is marked in the SAME colour as the score button that chose
+   it — var(--accent) is blue everywhere, so in the External edition the marker was
+   blue while the selected button beside it was orange. The panel sits inside
+   .qcard.lane-*, so it can follow the series the same way the buttons do. */
+.scalehelp .scaleitem.is-set{position:relative}
+.scalehelp .scaleitem.is-set::before{content:"";position:absolute;left:-11px;top:6px;bottom:6px;
+  width:3px;border-radius:2px;background:var(--series-1)}
+.lane-self .scalehelp .scaleitem.is-set .d strong{color:var(--series-1)}
+.lane-self .scalehelp .scaleitem.is-set::before{background:var(--series-1)}
+.lane-external .scalehelp .scaleitem.is-set .d strong{color:var(--series-2)}
+.lane-external .scalehelp .scaleitem.is-set::before{background:var(--series-2)}
 .scalelist{display:flex;flex-direction:column;gap:1px}
 .scaleitem{display:flex;gap:11px;align-items:center;padding:9px 0;border-bottom:1px solid var(--grid)}
 .scaleitem:last-child{border-bottom:0}
@@ -617,7 +647,7 @@ const FIXED_LANE = null;
 const CONSOLIDATOR = /*__CONSOLIDATOR__*/true;
 const KEY = FIXED_LANE ? "cvm-assess-" + FIXED_LANE + "-v1"
           : CONSOLIDATOR ? "cvm-consolidate-v1" : "cvm-assess-v1";
-const BUILD = "3.7 · 20 Aug 2026";   // shown in Setup so you can tell builds apart
+const BUILD = "3.8 · 20 Aug 2026";   // shown in Setup so you can tell builds apart
 const BUILT = /*__BUILT__*/"2026-08-20";     // ISO date this file was built; a floor under "today"
 
 /* ============================================================
@@ -882,7 +912,7 @@ try {
 } catch (e) { /* no window, or storage events unavailable */ }
 
 /* ---------- ui state ---------- */
-const ui = { tab: "assess", area: null, filter: "all", query: "", open: {}, showTable: false,
+const ui = { tab: "assess", area: null, filter: "all", query: "", open: {}, showTable: false, showScale: false,
              areaFilter: [], level: "area", pick: null, reportAppendix: false };
 
 /* ---------- helpers ---------- */
@@ -1286,18 +1316,29 @@ function qCardHTML(a, q) {
                       return (s != null && e != null) ? gapChip(e - s) : ""; })()}
          </div>`
       : `<div class="scale" role="group" aria-label="${esc(laneName(state.lane))} score, 1 to 8">
-      ${LEVELS.map((L, k) => `<button data-score="${k + 1}" aria-pressed="${mine === k + 1}" aria-label="${k + 1} — ${esc(L[0])}">${k + 1}</button>`).join("")}
+      ${LEVELS.map((L, k) => `<button data-score="${k + 1}" aria-pressed="${mine === k + 1}"
+        title="${esc(k + 1 + " · " + L[0] + " — " + L[1])}"
+        aria-label="${esc(k + 1 + " — " + L[0] + ". " + L[1])}">${k + 1}</button>`).join("")}
     </div>`}
     ${COMPARING() ? "" : `<div class="scalefoot">
-      <div class="levelname ${lvl ? "" : "empty"}">${lvl ? esc(mine + " · " + lvl[0]) : "Not yet scored"}</div>
+      <div class="levelname ${lvl ? "" : "empty"}">${lvl
+        ? `<b>${esc(mine + " · " + lvl[0])}</b><span class="leveldef">${esc(lvl[1])}</span>`
+        : `Not yet scored<span class="leveldef">1 &nbsp;${esc(LEVELS[0][0])}&nbsp; &rarr; &nbsp;8 &nbsp;${esc(LEVELS[7][0])}</span>`}</div>
       ${(!SOLO_UI() && otherV != null) ? `<div class="otherlane"><i class="swatch ${other === "self" ? "sw1" : "sw2"}"></i>${esc(other === "self" ? LBL_A(true) : LBL_B(true))} ${otherV}</div>` : ""}
     </div>`}
     ${myNote ? `<div class="srcline ${isAveraged(a.id, i, state.lane) ? "avg" : ""}">${esc(myNote)}</div>` : ""}
     ${(!SOLO_UI() && otherNote) ? `<div class="srcline other">${esc(other === "self" ? LBL_A(true) : LBL_B(true))}: ${esc(otherNote)}</div>` : ""}
     <div class="qactions" ${COMPARING() ? "hidden" : ""}>
       <button class="minibtn ${myC ? "on" : ""}" data-act="comment">&#9998; ${myC ? "Edit note" : "Add note"}</button>
+      <button class="minibtn ${ui.showScale ? "on" : ""}" data-act="scale" aria-expanded="${!!ui.showScale}">${ui.showScale ? "Hide the scale" : "What 1\u20138 mean"}</button>
       ${mine != null ? `<button class="minibtn" data-act="clear">Clear score</button>` : ""}
     </div>
+    ${!ui.showScale || COMPARING() ? "" : `<div class="scalehelp">
+      ${LEVELS.map((L, k) => `<div class="scaleitem ${mine === k + 1 ? "is-set" : ""}">
+        <div class="n">${k + 1}</div>
+        <div class="d"><strong>${esc(L[0])}</strong><span>${esc(L[1])}</span></div>
+      </div>`).join("")}
+    </div>`}
     <div class="cmtwrap" hidden>
       <label>${esc(laneName(state.lane))} comments</label>
       <textarea data-cmt placeholder="Evidence, rationale, objectives…">${esc(myC)}</textarea>
@@ -3272,6 +3313,11 @@ function handleAct(act, el) {
     const [aid, iS] = card.dataset.q.split("|"), i = +iS;
     if (act === "comment") { const w = card.querySelector(".cmtwrap"); w.hidden = !w.hidden; if (!w.hidden) card.querySelector("textarea").focus(); return; }
     if (act === "cancelcmt") { card.querySelector(".cmtwrap").hidden = true; return; }
+    /* Above the LOCKED() guard on purpose: the scale is read-only help, and
+       somebody whose licence has lapsed should still be able to read what the
+       numbers on their own answers mean. Re-renders the area rather than the one
+       card, because the panel is open for all of them or none. */
+    if (act === "scale") { ui.showScale = !ui.showScale; render(); return; }
     if (LOCKED() && (act === "savecmt" || act === "clear" || act === "comment")) {
       toast(LIC.unlicensed ? "A licence key is needed first" : "Licence ended \u2014 this assessment is read-only"); return;
     }
