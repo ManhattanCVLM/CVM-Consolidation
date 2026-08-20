@@ -615,8 +615,8 @@ const FIXED_LANE = null;
 const CONSOLIDATOR = /*__CONSOLIDATOR__*/true;
 const KEY = FIXED_LANE ? "cvm-assess-" + FIXED_LANE + "-v1"
           : CONSOLIDATOR ? "cvm-consolidate-v1" : "cvm-assess-v1";
-const BUILD = "3.5 · 18 Aug 2026";   // shown in Setup so you can tell builds apart
-const BUILT = /*__BUILT__*/"2026-08-18";     // ISO date this file was built; a floor under "today"
+const BUILD = "3.7 · 20 Aug 2026";   // shown in Setup so you can tell builds apart
+const BUILT = /*__BUILT__*/"2026-08-20";     // ISO date this file was built; a floor under "today"
 
 /* ============================================================
    LICENCE
@@ -1023,6 +1023,20 @@ function dashSubject() {
            title: (state.title || "").trim(),
            lane: L.both ? null : (L.only === "ea" ? "external" : "self") };
 }
+/* Comparing two assessments of the same kind over time is not the same question
+   as holding self against external, and the fixed labels were all written for the
+   second one. A "gap" between this year and last year is a change; a "divergence"
+   between them is a movement; "alignment" between two dates is not a thing. The
+   sentences alongside them already adapted — only the headings did not. */
+const DIFF_WORD = (cap) => {
+  const w = COMPARING() ? "change" : "gap";
+  return cap ? w[0].toUpperCase() + w.slice(1) : w;
+};
+const MOVE_WORD = (cap) => {
+  const w = COMPARING() ? "movement" : "alignment";
+  return cap ? w[0].toUpperCase() + w.slice(1) : w;
+};
+
 const LBL_A = s => seriesLabel("sa", s);
 const LBL_B = s => seriesLabel("ea", s);
 const cmpLoaded = () => !!(state.cmpA && state.cmpB);
@@ -1623,7 +1637,7 @@ function renderDash() {
   </div>
 
   ${!two ? "" : `<div class="card tight">
-    <div class="card-title" style="margin-bottom:7px">Overall alignment &middot; ${esc(scope)}</div>
+    <div class="card-title" style="margin-bottom:7px">Overall ${esc(MOVE_WORD())} &middot; ${esc(scope)}</div>
     <div style="display:flex;align-items:center;gap:12px">
       <div style="font-size:27px;font-weight:680;font-variant-numeric:tabular-nums;line-height:1.1">${o.gap == null ? "\u2014" : (o.gap > 0 ? "+" : "") + fmt(o.gap)}</div>
       <div style="flex:1;min-width:0;font-size:12.5px;color:var(--text-secondary);line-height:1.35">
@@ -1661,7 +1675,7 @@ function renderDash() {
     <div class="qactions"><button class="minibtn" data-act="toggletable">${ui.showTable ? "Hide" : "Show"} table view</button></div>
     ${ui.showTable ? `<div class="tablewrap" style="margin-top:10px"><table class="dt">
       <thead><tr><th>${ui.level === "subject" ? "Subject" : "Area"}</th>${
-        slots.map(k => `<th>${esc(SERIES[k].lbl(true))}</th>`).join("")}${two ? "<th>Gap</th>" : ""}<th>Q</th></tr></thead>
+        slots.map(k => `<th>${esc(SERIES[k].lbl(true))}</th>`).join("")}${two ? `<th>${esc(DIFF_WORD(true))}</th>` : ""}<th>Q</th></tr></thead>
       <tbody>${sorted.map(c => `<tr><td>${esc(c.name)}</td>${
         slots.map(k => `<td><b>${fmt(c.st[k])}</b></td>`).join("")}${
         two ? `<td>${c.st.gap == null ? "\u2014" : (c.st.gap > 0 ? "+" : "") + fmt(c.st.gap)}</td>` : ""}<td>${c.st.n}</td></tr>`).join("")}
@@ -1670,13 +1684,13 @@ function renderDash() {
   </div>
 
   ${!two ? "" : `
-  <div class="section-label">${COMPARING() ? "Largest differences between the two" : "Largest self vs external gaps"}</div>
+  <div class="section-label">${COMPARING() ? "Largest movements" : "Largest self vs external gaps"}</div>
   <div class="card">
     ${gaps.length === 0
       ? `<div class="empty"><div class="big">No differences to show</div><div>${COMPARING()
           ? "The two assessments agree on every question scored in both."
           : `Score the same questions in both ${esc(LBL_A(true))} and ${esc(LBL_B(true))} to compare them.`}</div></div>`
-      : `<div class="card-note">Questions where the two assessments diverge most. Tap to open the question.</div>
+      : `<div class="card-note">Questions where the two assessments ${COMPARING() ? "moved most" : "diverge most"}. Tap to open the question.</div>
          <div class="gaplist">${gaps.map(x => `<button class="gapitem" style="text-align:left;width:100%;background:none" data-goto="${x.aid}|${x.i}">
            <div class="txt"><div class="q">${esc(x.q)}</div><div class="a">${esc(x.area)} &middot; ${esc(x.subj)} &middot; ${esc(LBL_A(true))} ${x.s} / ${esc(LBL_B(true))} ${x.e}</div></div>
            ${gapChip(x.g)}
@@ -2216,7 +2230,11 @@ function renderMore() {
     ` : `<div style="font-size:12px;color:var(--text-muted);margin-top:4px">Nothing merged yet.</div>`}
   </div>`}
 
-  ${(FIXED_LANE && !COMPARING()) ? "" : `
+  ${/* Every edition can produce the report. The two assessor editions were
+       excluded on the reasoning that a report is the consolidator's output — which
+       was wrong: somebody who has just scored 350 questions wants the document at
+       the end of it, and the report already names a single assessment by its own
+       title rather than pretending a second column exists. */""}
   <div class="card">
     <div class="card-title">Create PDF report</div>
     <div class="card-note">A complete report: summary, the radar and bar charts, area and subject tables, the largest divergences, and who assessed what.</div>
@@ -2225,7 +2243,7 @@ function renderMore() {
       <label class="checkrow"><input type="checkbox" id="fAppendix" ${ui.reportAppendix ? "checked" : ""}>
         <span>Include every question and note as an appendix<small>Adds ${TOTAL_Q} rows &mdash; thorough, but a much longer document</small></span></label>
     </div>
-  </div>`}
+  </div>
 
   ${COMPARING() ? "" : `
   <div class="card">
@@ -2579,9 +2597,15 @@ function buildReportHTML() {
   /* Only areas that actually have a score can be the weakest. Sorting nulls to
      99 and taking the first three presented unscored areas as findings: a report
      with nothing scored read "Core Supply Chain (—), Spend Analytics (—) score
-     lowest and are the natural focus for improvement." */
-  const byWeakest = areaCats.filter(c => c.st[primary] != null)
-    .sort((x, y) => x.st[primary] - y.st[primary]);
+     lowest and are the natural focus for improvement."
+
+     Ranked on the LATER assessment when comparing. `primary` is the first series,
+     which in a comparison is last year's — so "the natural focus for improvement"
+     was pointing at where they were weakest before the work, not where they are
+     weakest now. */
+  const weakKey = (COMPARING() && slots.length > 1) ? slots[slots.length - 1] : primary;
+  const byWeakest = areaCats.filter(c => c.st[weakKey] != null)
+    .sort((x, y) => x.st[weakKey] - y.st[weakKey]);
 
   // charts: fixed widths that suit A4 at ~96dpi with 18mm margins
   const savedPick = ui.pick;
@@ -2593,8 +2617,13 @@ function buildReportHTML() {
   REPORT_MODE = false;
   ui.pick = savedPick;
 
+  /* A divergence is a statement about two assessments, so a single-purpose
+     edition has none — and must not print any. A restored backup can carry the
+     other side's scores in the file, which would otherwise produce a "Largest
+     divergences" section naming the other kind in the client's PDF. The same
+     reason the area gap chip is suppressed on screen. */
   const gaps = [];
-  DATA.areas.forEach(a => a.questions.forEach((q, i) => {
+  if (!SOLO_UI()) DATA.areas.forEach(a => a.questions.forEach((q, i) => {
     const s = val(a.id, i, "self"), e = val(a.id, i, "external");
     if (s == null || e == null || e === s) return;
     gaps.push({ area: a.name, subj: q.subject, q: q.q, s, e, g: e - s });
@@ -2616,7 +2645,7 @@ function buildReportHTML() {
           (st.gap > 0 ? esc(LBL_B(true)) + " " + fmt(st.gap) + " higher" : esc(LBL_B(true)) + " " + fmt(Math.abs(st.gap)) + " lower"))) : ""}
         &middot; ${st.n} questions</p>
       <table>
-        <thead><tr><th>Subject</th>${th(true)}${two ? '<th class="num">Gap</th>' : ""}<th class="num">Q</th></tr></thead>
+        <thead><tr><th>Subject</th>${th(true)}${two ? `<th class="num">${esc(DIFF_WORD(true))}</th>` : ""}<th class="num">Q</th></tr></thead>
         <tbody>${subs.map(sx => `<tr>
           <td>${esc(sx.name)}</td>
           ${cells(sx.st)}
@@ -2715,8 +2744,14 @@ function buildReportHTML() {
     <dd>${COMPARING() ? `${esc(LBL_A())} and ${esc(LBL_B())}, ${o.both} question${o.both === 1 ? "" : "s"} in both`
         : two ? `${o.saN} self, ${o.eaN} external, of ${TOTAL_Q}`
         : `${primary === "sa" ? o.saN : o.eaN} of ${TOTAL_Q} \u00b7 ${esc(laneName(primary === "sa" ? "self" : "external"))}`}</dd>
-    <dt>Contributors</dt><dd>${contributors.length ? contributors.map(c => esc(c.name)).join(", ") : esc(state.assessor || "—")}</dd>
-    <dt>Consolidated by</dt><dd>${esc(state.assessor || "—")}</dd>
+    ${/* An assessor's own report said "Contributors: Sam / Consolidated by: Sam" —
+         the same name twice, the second under a heading describing something that
+         cannot happen in that edition, since the merge engine is not compiled into
+         it. One assessor is "Assessed by"; a consolidation names its contributors
+         and who assembled them. */""}
+    <dt>${CONSOLIDATOR || contributors.length > 1 ? "Contributors" : "Assessed by"}</dt>
+    <dd>${contributors.length ? contributors.map(c => esc(c.name)).join(", ") : esc(state.assessor || "—")}</dd>
+    ${CONSOLIDATOR ? `<dt>Consolidated by</dt><dd>${esc(state.assessor || "—")}</dd>` : ""}
   </dl>
 </div>
 
@@ -2728,7 +2763,7 @@ function buildReportHTML() {
     ${!two ? `<div class="kpi"><div class="l">Questions scored</div>
       <div class="v">${primary === "sa" ? o.saN : o.eaN}<small> / ${TOTAL_Q}</small></div>
       <div class="c">${Math.round(((primary === "sa" ? o.saN : o.eaN) / TOTAL_Q) * 100)}% complete</div></div>`
-    : `<div class="kpi"><div class="l">Alignment</div>
+    : `<div class="kpi"><div class="l">${esc(MOVE_WORD(true))}</div>
       <div class="v">${o.gap == null ? "\u2014" : (o.gap > 0 ? "+" : "") + fmt(o.gap)}</div>
       <div class="c">${o.both} of ${TOTAL_Q} comparable</div></div>`}
   </div>
@@ -2760,8 +2795,8 @@ function buildReportHTML() {
           ? `Overall maturity sits at <b>${fmt(o.ea)} of 8</b> on the external assessment against <b>${fmt(o.sa)}</b> self-assessed. The external view is <b>${fmt(Math.abs(o.gap))} points lower</b>, indicating the organisation rates itself above the evidence available — the gap itself is a finding, since remediation plans built on the self-assessment would start from an optimistic baseline.`
           : `Overall maturity sits at <b>${fmt(o.ea)} of 8</b> on the external assessment against <b>${fmt(o.sa)}</b> self-assessed. The external view is <b>${fmt(o.gap)} points higher</b>, indicating capability that exists but is under-recognised internally — often a sign that good practice is present but not documented or credited.`}</p>
   ${byWeakest.length >= 2
-    ? `<p><b>Weakest areas.</b> ${byWeakest.slice(0, 3).map(c => esc(c.name) + " (" + fmt(c.st[primary]) + ")").join(", ")}
-       score lowest on ${esc(SERIES[primary].lbl())} and are the natural focus for improvement.</p>`
+    ? `<p><b>Weakest areas.</b> ${byWeakest.slice(0, 3).map(c => esc(c.name) + " (" + fmt(c.st[weakKey]) + ")").join(", ")}
+       score lowest on ${esc(SERIES[weakKey].lbl())} and are the natural focus for improvement.</p>`
     : `<p><b>Weakest areas.</b> Too few areas have been scored to rank them. ${TOTAL_Q - (primary === "sa" ? o.saN : o.eaN)} of the ${TOTAL_Q} questions are still unanswered.</p>`}
   ${averaged.length ? `<p><b>Consolidation.</b> ${contributors.length} assessors contributed. ${averaged.length} question${averaged.length === 1 ? " was" : "s were"} answered by more than one assessor; those scores are the average of the contributions, rounded down to the nearest level. The contributing scores are recorded against each question.</p>` : ""}
 </section>
@@ -2783,7 +2818,7 @@ function buildReportHTML() {
   ${legend}
   <div class="chart">${bars}</div>
   <table>
-    <thead><tr><th>Assessment area</th>${th(true)}${two ? '<th class="num">Gap</th>' : ""}<th class="num">Questions</th></tr></thead>
+    <thead><tr><th>Assessment area</th>${th(true)}${two ? `<th class="num">${esc(DIFF_WORD(true))}</th>` : ""}<th class="num">Questions</th></tr></thead>
     <tbody>
       ${byWeakest.map(c => `<tr><td>${esc(c.name)}</td>${cells(c.st)}${two ? gapCell(c.st.gap) : ""}<td class="num">${c.st.n}</td></tr>`).join("")}
       <tr><td><b>All areas</b></td>${slots.map(k => `<td class="num"><b>${fmt(o[k])}</b></td>`).join("")}${two ? gapCell(o.gap) : ""}<td class="num"><b>${TOTAL_Q}</b></td></tr>
@@ -2798,11 +2833,11 @@ function buildReportHTML() {
 </section>
 
 ${topGaps.length ? `<section class="page-break">
-  <h2>Largest divergences</h2>
+  <h2>${COMPARING() ? "Largest movements" : "Largest divergences"}</h2>
   <p class="lead">Questions where ${esc(LBL_A())} and ${esc(LBL_B())} differ most.${COMPARING()
     ? " This is where the change between them actually happened." : " These are the conversations worth having first."}</p>
   <table>
-    <thead><tr><th>Question</th>${th(true)}<th class="num">Gap</th></tr></thead>
+    <thead><tr><th>Question</th>${th(true)}<th class="num">${esc(DIFF_WORD(true))}</th></tr></thead>
     <tbody>${topGaps.map(x => `<tr>
       <td><span class="subj" style="display:block;font-size:7.5pt;letter-spacing:.04em;text-transform:uppercase;color:${REPORT_PALETTE.ink3}">${esc(x.area)} &middot; ${esc(x.subj)}</span>${esc(x.q)}</td>
       <td class="num">${x.s}</td><td class="num">${x.e}</td>${gapCell(x.g)}</tr>`).join("")}</tbody>
@@ -2821,7 +2856,7 @@ ${topGaps.length ? `<section class="page-break">
     <li>Each question is answered once per assessment by a single assessor; unanswered questions are filled from whichever contributor completed them.</li>
     <li>Where two or more assessors answered the same question, the consolidated score is the mean of their scores, rounded down to the nearest whole level.</li>
     <li>Area and subject figures are the unweighted mean of the question scores within them, so areas with more questions carry proportionally more detail but no extra weight.</li>
-    ${two ? "<li>Only questions answered in both assessments contribute to a gap figure.</li>" : ""}
+    ${two ? `<li>Only questions answered in both assessments contribute to a ${esc(DIFF_WORD())} figure.</li>` : ""}
     ${COMPARING() ? "<li>The two assessments compared here are named by their own titles throughout; neither is treated as the baseline for the other.</li>" : ""}
   </ul>
   ${contributors.length ? `<h3>Contributors</h3>
@@ -2984,7 +3019,7 @@ function licBar() {
       ${CLOCK.suspect ? `<b>Before anything else, check the date and time on this device. Its clock reads
          ${esc(niceDate(CLOCK.reading))}, which does not agree with what this copy already knows. If the clock is
          wrong, correcting it and reloading may be all that is needed.</b>` : ""}
-      Your answers are safe and can still be exported${(FIXED_LANE && !COMPARING()) ? "" : " or reported on"} \u2014 scoring is switched off.
+      Your answers are safe and can still be exported or reported on \u2014 scoring is switched off.
       Contact ${esc(LIC_CONTACT)} to renew, then paste the new key under <b>Setup &#8250; Licence</b>.
       <div class="licrow"><button class="minibtn" data-act="tolicence">Enter a new key</button>
         <button class="minibtn" data-act="json">Export my assessment</button></div>
