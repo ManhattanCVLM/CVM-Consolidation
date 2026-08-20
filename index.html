@@ -619,6 +619,7 @@ body.sheet-open{overflow:hidden}
 <input type="file" id="fileIn" accept=".json,application/json" hidden>
 <input type="file" id="mergeIn" accept=".json,application/json" multiple hidden>
 <input type="file" id="cmpIn" accept=".json,application/json" hidden>
+<input type="file" id="csvIn" accept=".csv,text/csv" hidden>
 <div id="sheetHost" hidden></div>
 <script>
 "use strict";
@@ -647,7 +648,7 @@ const FIXED_LANE = null;
 const CONSOLIDATOR = /*__CONSOLIDATOR__*/true;
 const KEY = FIXED_LANE ? "cvm-assess-" + FIXED_LANE + "-v1"
           : CONSOLIDATOR ? "cvm-consolidate-v1" : "cvm-assess-v1";
-const BUILD = "3.8 · 20 Aug 2026";   // shown in Setup so you can tell builds apart
+const BUILD = "3.9 · 20 Aug 2026";   // shown in Setup so you can tell builds apart
 const BUILT = /*__BUILT__*/"2026-08-20";     // ISO date this file was built; a floor under "today"
 
 /* ============================================================
@@ -2095,6 +2096,353 @@ function runPendingImport() {
 
 /*__MERGE_END__*/
 
+/* ============================================================
+   CSV IMPORT
+
+   Two files have to be accepted, because there are two ways a spreadsheet of
+   scores comes into existence:
+
+     • the app's own CSV export, edited in Excel and sent back. This is the awkward
+       one. The score column is headed with the ASSESSMENT TITLE — "Dec 2025
+       Review", not "Self assessment" — because the export names its columns after
+       the data. So an importer cannot look for a fixed header and has to work out
+       which column holds the scores.
+
+     • a template somebody filled in, for a client whose scores already live in a
+       spreadsheet. Question text plus a score is enough; everything else optional.
+
+   All 350 question texts are unique, so a row is matched on its question alone,
+   normalised for whitespace and for the curly quotes Excel and Word insert. The
+   area column, when present, is only a cross-check.
+
+   Nothing is written until the review step is confirmed. A CSV that cannot be
+   understood is refused whole rather than half-applied: a partial import of
+   somebody's assessment is worse than no import, because there is no way to tell
+   afterwards which answers came from where.
+   ============================================================ */
+
+/* RFC 4180 enough: quoted fields, "" for a literal quote, commas and newlines
+   inside quotes, CRLF or LF, and the BOM Excel insists on. */
+function parseCSV(text) {
+  let s = String(text || "");
+  if (s.charCodeAt(0) === 0xFEFF) s = s.slice(1);
+  const rows = [];
+  let row = [], field = "", q = false;
+  for (let i = 0; i < s.length; i++) {
+    const c = s[i];
+    if (q) {
+      if (c === '"') {
+        if (s[i + 1] === '"') { field += '"'; i++; }
+        else q = false;
+      } else field += c;
+      continue;
+    }
+    if (c === '"') { q = true; continue; }
+    if (c === ",") { row.push(field); field = ""; continue; }
+    if (c === "\r") { if (s[i + 1] === "\n") i++; rows.push(row.concat(field)); row = []; field = ""; continue; }
+    if (c === "\n") { rows.push(row.concat(field)); row = []; field = ""; continue; }
+    field += c;
+  }
+  if (field !== "" || row.length) rows.push(row.concat(field));
+  /* Excel leaves a trailing blank line; a row of nothing is not a row. */
+  return rows.filter(r => r.some(c => String(c).trim() !== ""));
+}
+
+/* Question text as written by a human, a spreadsheet, or us. Excel and Word
+   substitute curly quotes and en dashes on their own initiative, so a round trip
+   through either would otherwise stop matching. */
+const normQ = s => String(s == null ? "" : s)
+  .replace(/[‘’‛]/g, "'")
+  .replace(/[“”]/g, '"')
+  .replace(/[‐-―]/g, "-")
+  .replace(/ /g, " ")
+  .replace(/\s+/g, " ")
+  .trim()
+  .toLowerCase();
+
+let QLOOKUP = null;
+function questionLookup() {
+  if (QLOOKUP) return QLOOKUP;
+  QLOOKUP = new Map();
+  DATA.areas.forEach(a => a.questions.forEach((q, i) =>
+    QLOOKUP.set(normQ(q.q), { aid: a.id, area: a.name, i, subject: q.subject, q: q.q })));
+  return QLOOKUP;
+}
+
+const headerish = h => String(h || "").replace(/\s+/g, " ").trim();
+
+/* Which column holds the scores. In order of confidence, because guessing wrong
+   here would import the wrong numbers rather than fail — much the worst outcome. */
+function findScoreCol(head, rows, laneLabels) {
+  const H = head.map(headerish);
+  const lower = H.map(h => h.toLowerCase());
+  const notNote = k => !/comment|note|assessor/i.test(H[k]);
+
+  /* 1. exactly what this edition would have written */
+  for (const want of laneLabels) {
+    const k = lower.indexOf(String(want).toLowerCase());
+    if (k >= 0 && notNote(k)) return { col: k, why: `column "${H[k]}"` };
+  }
+  /* 2. a template's own word for it */
+  for (let k = 0; k < H.length; k++)
+    if (/^(score|rating|level|maturity|value|answer)$/i.test(H[k])) return { col: k, why: `column "${H[k]}"` };
+  /* 3. the export names the score column after the assessment title, and the
+        title is also sitting in the "Assessment Title" column of every row */
+  const tIdx = lower.indexOf("assessment title");
+  if (tIdx >= 0 && rows.length) {
+    const title = headerish(rows[0][tIdx]).toLowerCase();
+    const k = title ? lower.indexOf(title) : -1;
+    if (k >= 0 && notNote(k)) return { col: k, why: `column "${H[k]}", named after the assessment` };
+  }
+  /* 4. last resort: exactly one column that looks like 1-8 scores and nothing
+        else. Two such columns is ambiguous and must not be guessed at. */
+  const candidates = [];
+  for (let k = 0; k < H.length; k++) {
+    if (!notNote(k)) continue;
+    let seen = 0, bad = 0;
+    for (const r of rows) {
+      const v = headerish(r[k]);
+      if (v === "") continue;
+      seen++;
+      if (!/^[1-8]$/.test(v)) bad++;
+    }
+    if (seen > 0 && bad === 0) candidates.push(k);
+  }
+  if (candidates.length === 1) return { col: candidates[0], why: `column "${H[candidates[0]]}" — the only one holding 1–8` };
+  if (candidates.length > 1)
+    return { error: `More than one column could be the scores (${candidates.map(k => '"' + H[k] + '"').join(", ")}). Rename the one you mean to "Score".` };
+  return { error: `No column of scores found. Headings seen: ${H.filter(Boolean).map(h => '"' + h + '"').join(", ")}.` };
+}
+
+function findNotesCol(head, scoreCol) {
+  const H = head.map(headerish);
+  const base = H[scoreCol] || "";
+  /* "<title> Comments" sits beside "<title>" in our own export. */
+  let k = H.findIndex(h => h.toLowerCase() === (base + " comments").toLowerCase());
+  if (k >= 0) return k;
+  k = H.findIndex(h => /^(notes?|comments?|evidence|rationale)$/i.test(h));
+  if (k >= 0) return k;
+  k = H.findIndex((h, idx) => idx !== scoreCol && /comment|note/i.test(h) && !/assessor/i.test(h));
+  return k;
+}
+
+/* Read a CSV into something the review step can describe honestly. */
+function readScoreCSV(text, filename) {
+  const rows = parseCSV(text);
+  if (rows.length < 2) return { error: "That file has no rows in it." };
+  const head = rows[0], body = rows.slice(1);
+
+  const qIdx = head.map(headerish).findIndex(h => /^question( text)?$/i.test(h));
+  if (qIdx < 0) {
+    return { error: 'No "Question" column. The file needs one column of question text so each score can be matched to its question.' };
+  }
+  const areaIdx = head.map(headerish).findIndex(h => /^(assessment )?area$/i.test(h));
+
+  /* What this edition calls its own score column, and what it calls the OTHER
+     kind — so an external export dropped into the Self app is refused by name
+     rather than silently read as self scores. */
+  const mine = SOLO_UI() ? [laneName(FIXED_LANE), (state.title || "").trim()].filter(Boolean)
+                         : [LBL_A(), LBL_B(), (state.title || "").trim()].filter(Boolean);
+  const found = findScoreCol(head, body, mine);
+  if (found.error) return { error: found.error };
+
+  if (SOLO_UI()) {
+    const h = headerish(head[found.col]).toLowerCase();
+    const otherWord = FIXED_LANE === "self" ? "external" : "self";
+    if (h.indexOf(otherWord) >= 0) {
+      return { error: `That column of scores is headed "${headerish(head[found.col])}". This app holds ` +
+                      `${laneName(FIXED_LANE).toLowerCase()}s, so importing it would file somebody's answers ` +
+                      `against the wrong kind of assessment.` };
+    }
+  }
+
+  const notesIdx = findNotesCol(head, found.col);
+  const lookup = questionLookup();
+  const matched = [], unmatched = [], badValue = [], wrongArea = [];
+  const seen = new Set();
+
+  body.forEach((r, n) => {
+    const qText = headerish(r[qIdx]);
+    if (!qText) return;
+    const hit = lookup.get(normQ(qText));
+    if (!hit) { unmatched.push({ line: n + 2, q: qText }); return; }
+    const key = hit.aid + "|" + hit.i;
+    if (seen.has(key)) { badValue.push({ line: n + 2, q: hit.q, why: "the same question twice in one file" }); return; }
+
+    const raw = headerish(r[found.col]);
+    let v = null;
+    if (raw !== "") {
+      if (!/^[1-8]$/.test(raw)) { badValue.push({ line: n + 2, q: hit.q, why: `score "${raw}" is not a whole number from 1 to 8` }); return; }
+      v = +raw;
+    }
+    if (areaIdx >= 0) {
+      const a = headerish(r[areaIdx]);
+      if (a && normQ(a) !== normQ(hit.area)) wrongArea.push({ line: n + 2, q: hit.q, said: a, actually: hit.area });
+    }
+    seen.add(key);
+    matched.push({ ...hit, v, note: notesIdx >= 0 ? headerish(r[notesIdx]) : "" });
+  });
+
+  if (!matched.length) {
+    return { error: unmatched.length
+      ? `None of the ${unmatched.length} question${unmatched.length === 1 ? "" : "s"} in that file matched this assessment. ` +
+        `Question text has to match; the template has all ${TOTAL_Q} of them already written out.`
+      : "No rows with a question in them." };
+  }
+
+  /* What applying it would actually do, worked out before anything is offered. */
+  const lane = SOLO_UI() ? FIXED_LANE : state.lane;
+  let fills = 0, changes = 0, same = 0, blanks = 0, notes = 0;
+  matched.forEach(m => {
+    const cur = val(m.aid, m.i, lane);
+    if (m.v == null) { blanks++; }
+    else if (cur == null) fills++;
+    else if (cur === m.v) same++;
+    else changes++;
+    if (m.note) notes++;
+    m.cur = cur;
+  });
+
+  return { file: filename, head: head.map(headerish), scoreCol: found.col, scoreWhy: found.why,
+           notesCol: notesIdx, lane, matched, unmatched, badValue, wrongArea,
+           counts: { fills, changes, same, blanks, notes, rows: body.length } };
+}
+
+/* ---------- review, then apply ---------- */
+let pendingCSV = null;
+
+function csvSheetHTML() {
+  const r = pendingCSV;
+  if (!r) return "";
+  const c = r.counts;
+  const n = s => `<b>${s}</b>`;
+  const willWrite = c.fills + c.changes;
+  return `<div class="sheet-backdrop" data-csv="cancel"></div>
+  <div class="sheet" role="dialog" aria-modal="true" aria-label="Review a CSV before importing">
+    <div class="sheet-head">
+      <h2>Import from a spreadsheet</h2>
+      <p>Nothing is written until you choose below. ${esc(r.file)}</p>
+    </div>
+    <div class="sheet-body">
+      <div class="subcard">
+        <div class="who">${r.matched.length} of ${c.rows} row${c.rows === 1 ? "" : "s"} matched a question</div>
+        <div class="meta">Scores read from ${esc(r.scoreWhy)}${r.notesCol >= 0 ? `, notes from "${esc(r.head[r.notesCol])}"` : ", no notes column"}.</div>
+        <div class="meta">Into the ${esc(laneName(r.lane).toLowerCase())}.</div>
+      </div>
+      <div class="subcard">
+        <div class="who">What it would do</div>
+        <div class="meta">${n(c.fills)} question${c.fills === 1 ? "" : "s"} answered for the first time</div>
+        <div class="meta">${n(c.changes)} existing answer${c.changes === 1 ? "" : "s"} would <b>change</b></div>
+        <div class="meta">${n(c.same)} already the same${c.blanks ? ` &middot; ${n(c.blanks)} left blank in the file` : ""}</div>
+        ${c.notes ? `<div class="meta">${n(c.notes)} note${c.notes === 1 ? " comes" : "s come"} with it</div>` : ""}
+      </div>
+      ${r.unmatched.length ? `<div class="subcard flagged">
+        <div class="who">${r.unmatched.length} row${r.unmatched.length === 1 ? "" : "s"} did not match a question</div>
+        <div class="meta">These are ignored. Nothing else in the file is affected.</div>
+        ${r.unmatched.slice(0, 5).map(u => `<div class="meta file">line ${u.line}: ${esc(u.q.slice(0, 90))}</div>`).join("")}
+        ${r.unmatched.length > 5 ? `<div class="meta file">&hellip; and ${r.unmatched.length - 5} more</div>` : ""}
+      </div>` : ""}
+      ${r.badValue.length ? `<div class="subcard flagged">
+        <div class="who">${r.badValue.length} row${r.badValue.length === 1 ? "" : "s"} skipped</div>
+        ${r.badValue.slice(0, 5).map(x => `<div class="meta file">line ${x.line}: ${esc(x.why)}</div>`).join("")}
+        ${r.badValue.length > 5 ? `<div class="meta file">&hellip; and ${r.badValue.length - 5} more</div>` : ""}
+      </div>` : ""}
+      ${r.wrongArea.length ? `<div class="subcard flagged">
+        <div class="who">${r.wrongArea.length} row${r.wrongArea.length === 1 ? "" : "s"} name a different area</div>
+        <div class="meta">Matched on the question, which is unique, so these will import anyway &mdash; but a
+          disagreeing area column usually means rows have been moved about.</div>
+        ${r.wrongArea.slice(0, 3).map(x => `<div class="meta file">line ${x.line}: file says "${esc(x.said)}", question is in "${esc(x.actually)}"</div>`).join("")}
+      </div>` : ""}
+    </div>
+    <div class="sheet-foot">
+      <div class="tally">${willWrite === 0
+        ? "Nothing in this file would change your answers."
+        : `<b>${willWrite}</b> answer${willWrite === 1 ? "" : "s"} would be written${c.changes ? `, ${c.changes} of them over something already there` : ""}.`}</div>
+      <div class="sheet-actions">
+        <button class="bigbtn" data-csv="cancel">Cancel</button>
+        <button class="bigbtn" data-csv="blanks" ${c.fills ? "" : "disabled"}>Fill blanks only${c.fills ? ` (${c.fills})` : ""}</button>
+        <button class="bigbtn primary" data-csv="replace" ${willWrite ? "" : "disabled"}>Import all${willWrite ? ` (${willWrite})` : ""}</button>
+      </div>
+    </div>
+  </div>`;
+}
+
+function applyCSV(mode) {
+  const r = pendingCSV;
+  if (!r) return;
+  undoSnapshot = JSON.stringify(state);          // same one-step undo the merge uses
+  let wrote = 0, notes = 0;
+  r.matched.forEach(m => {
+    if (m.v == null) return;                      // blank in the file is not an answer
+    if (mode === "blanks" && m.cur != null) return;
+    setScore(m.aid, m.i, r.lane, m.v);
+    wrote++;
+    if (m.note) {
+      setResp(m.aid, m.i, r.lane === "self" ? { sac: m.note } : { eac: m.note });
+      notes++;
+    }
+  });
+  pendingCSV = null;
+  forgetLanes(); save(); render();
+  toast(`${wrote} answer${wrote === 1 ? "" : "s"} imported${notes ? `, ${notes} with notes` : ""}`);
+}
+
+/* A template with every question already written out, so nobody has to retype
+   question text and discover afterwards that it no longer matches. */
+function csvTemplate() {
+  const rows = [["Assessment Area", "Assessment Subject", "Question", "Score", "Notes"]];
+  DATA.areas.forEach(a => a.questions.forEach(q => rows.push([a.name, q.subject, q.q, "", ""])));
+  return "﻿" + rows.map(r => r.map(csvCell).join(",")).join("\r\n");
+}
+
+/* Its own sheet plumbing, deliberately. showImportSheet, hideImportSheet and the
+   #sheetHost click handler all live inside the merge blocks, which are stripped
+   from every build except the consolidator — so reusing them would have meant
+   either no CSV import in the client editions, or moving merge code out of the
+   region the build asserts on. Twenty lines of duplication is the cheaper of the
+   three. */
+function showCSVSheet() {
+  const host = $("#sheetHost");
+  host.innerHTML = csvSheetHTML();
+  host.hidden = false;
+  document.body.classList.add("sheet-open");
+}
+function hideCSVSheet(msg) {
+  const host = $("#sheetHost");
+  host.hidden = true; host.innerHTML = "";
+  document.body.classList.remove("sheet-open");
+  pendingCSV = null;
+  if (msg) toast(msg);
+}
+
+$("#sheetHost").addEventListener("click", e => {
+  const act = e.target.closest("[data-csv]");
+  if (!act) return;                            // the consolidator's merge sheet handles its own
+  const what = act.dataset.csv;
+  if (what === "cancel") { hideCSVSheet("Import cancelled"); return; }
+  if (what === "blanks" || what === "replace") { applyCSV(what === "blanks" ? "blanks" : "replace"); hideCSVSheet(); return; }
+});
+document.addEventListener("keydown", e => {
+  if (e.key === "Escape" && pendingCSV) hideCSVSheet("Import cancelled");
+});
+
+$("#csvIn").addEventListener("change", e => {
+  const f = e.target.files && e.target.files[0];
+  e.target.value = "";                          // so picking the same file twice still fires
+  if (!f) return;
+  const r = new FileReader();
+  r.onload = () => {
+    let res;
+    try { res = readScoreCSV(String(r.result || ""), f.name); }
+    catch (err) { alert("That file could not be read as a spreadsheet of scores."); return; }
+    if (res.error) { alert(res.error); return; }
+    pendingCSV = res;
+    showCSVSheet();
+  };
+  r.onerror = () => alert("That file could not be read.");
+  r.readAsText(f);
+});
+
 /* Display-only: these read provenance that is already in the file. They stay in
    every edition so a merged assessment still shows who scored what — but without
    the engine above, no edition except the consolidator can perform a merge. */
@@ -2257,7 +2605,7 @@ function renderMore() {
     ${laneRollupHTML()}
     <div class="btnrow" style="margin-top:12px">
       <button class="bigbtn primary" data-act="merge">Import &amp; combine submissions</button>
-      ${undoSnapshot ? `<button class="bigbtn" data-act="undomerge">Undo last import</button>` : ""}
+      ${undoSnapshot ? `<button class="bigbtn" data-act="undomerge">Undo the last import</button>` : ""}
     </div>
     ${state.submissions.length ? `
       <div class="section-label" style="margin:16px 2px 6px">Contributors</div>
@@ -2333,9 +2681,24 @@ function renderMore() {
     <div class="btnrow">
       <button class="bigbtn primary" data-act="json">Export my assessment (JSON)</button>
       <button class="bigbtn" data-act="csv">Export CSV for Excel</button>
+      <button class="bigbtn" data-act="csvin">Import scores from a spreadsheet</button>
+      <button class="bigbtn" data-act="csvtpl">Download a blank spreadsheet</button>
       <button class="bigbtn" data-act="import">Replace everything from a backup</button>
+      ${/* The undo button existed only inside the consolidator's merge card, so a
+           spreadsheet import in any other edition set an undo snapshot that nothing
+           could reach. An import that can rewrite 350 answers needs a way back.
+
+           Only where that card is not showing, though: putting one here
+           unconditionally gave the consolidator two buttons doing the same thing,
+           worded differently, on one screen. The condition is the negation of the
+           merge card's own. */""}
+      ${(undoSnapshot && (FIXED_LANE || !CONSOLIDATOR || COMPARING()))
+        ? `<button class="bigbtn" data-act="undomerge">Undo the last import</button>` : ""}
     </div>
-    <div style="font-size:12px;color:var(--text-muted);margin-top:9px">Replacing overwrites this device's answers entirely.${CONSOLIDATOR ? " To add someone else's work to what is already here, use <b>Import &amp; combine submissions</b> above." : ""}</div>
+    <div style="font-size:12px;color:var(--text-muted);margin-top:9px">A spreadsheet is matched to the questions by
+      their text, so the file this app exports can be edited in Excel and brought back &mdash; or start from the blank
+      one, which has all ${TOTAL_Q} questions already written out. You are shown what it would change before anything is
+      written.<br><br>Replacing overwrites this device's answers entirely.${CONSOLIDATOR ? " To add someone else's work to what is already here, use <b>Import &amp; combine submissions</b> above." : ""}</div>
   </div>
 
   <div class="card">
@@ -3343,6 +3706,13 @@ function handleAct(act, el) {
   }
   if (act === "toggletable") { ui.showTable = !ui.showTable; render(true); return; }
   if (act === "csv") { download(buildCSV(), reportName("csv"), "text/csv;charset=utf-8"); return; }
+  if (act === "csvtpl") { download(csvTemplate(), nameParts("cvm-blank") + ".csv", "text/csv;charset=utf-8"); return; }
+  if (act === "csvin") {
+    /* Guarded like the other things that write: a lapsed licence can read and
+       export, not take in a batch of new answers. */
+    if (LOCKED()) { toast(LIC.unlicensed ? "A licence key is needed first" : "Licence ended — this assessment is read-only"); return; }
+    $("#csvIn").click(); return;
+  }
   if (act === "json") {
     download(JSON.stringify({ app: "cvm-assess", version: 2, build: BUILD, edition: FIXED_LANE || "full",
       exported: new Date().toISOString(), state: exportState() }, null, 2),
@@ -3383,7 +3753,9 @@ function handleAct(act, el) {
   if (act === "merge") { if (CONSOLIDATOR) $("#mergeIn").click(); return; }
   if (act === "undomerge") {
     if (!undoSnapshot) { toast("Nothing to undo"); return; }
-    if (!confirm("Undo the last import? Everything merged in that step is removed.")) return;
+    /* "merged" was accurate when only the consolidator could reach this. A
+       spreadsheet import is not a merge. */
+    if (!confirm("Undo the last import? Every answer it brought in is put back as it was.")) return;
     try { state = JSON.parse(undoSnapshot); } catch (e) { toast("Undo failed"); return; }
     undoSnapshot = null; save(); render(); toast("Last import undone"); return;
   }

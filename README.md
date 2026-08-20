@@ -112,6 +112,45 @@ leave merge-capable code recoverable from an earlier commit.
 
 ---
 
+## Importing scores from a spreadsheet
+
+**Setup → Import scores from a spreadsheet** takes a CSV. Two kinds work, because
+there are two ways a spreadsheet of scores comes to exist:
+
+- **The app's own CSV export, edited and brought back.** Export, change the score
+  column in Excel, import it. This is the awkward one to support: the export names
+  its score column after the *assessment title* — "Dec 2025 Review", not "Self
+  assessment" — so the importer cannot look for a fixed heading and has to work out
+  which column holds the scores.
+- **A blank spreadsheet somebody filled in**, for a client whose scores already
+  live elsewhere. **Download a blank spreadsheet** gives all 350 questions with
+  empty `Score` and `Notes` columns, so nobody retypes question text and finds out
+  later that it no longer matches.
+
+Rows are matched on **question text**, which is unique across all 350, normalised
+for whitespace and for the curly quotes Excel and Word insert unbidden. Row order
+does not matter; an `Assessment Area` column, if present, is only a cross-check.
+Notes come in alongside scores.
+
+**Nothing is written until you say so.** The review step reports how many rows
+matched, how many questions would be answered for the first time, how many existing
+answers would *change*, and lists every row it skipped and why — a score of 9, a
+score of "high", the same question twice, a question it does not recognise. Then
+**Fill blanks only**, which never overwrites a typed answer, or **Import all**.
+Either can be undone in one step.
+
+A file it cannot understand is **refused whole**, not half-applied: no score column,
+two candidate score columns, no question column, nothing matching. A partial import
+is worse than none, because afterwards there is no way to tell which answers came
+from where.
+
+Two things it will not do. A locked edition refuses a spreadsheet whose score column
+is headed with the other kind — an external export dropped into the Self app is
+turned away by name rather than filed as self scores. And importing is a write, so a
+lapsed licence cannot do it, though export still works.
+
+---
+
 ## Licensing
 
 This app is **not** licensed or time-limited — it is your tool, and locking yourself out
@@ -157,7 +196,7 @@ storage for that origin and survive the first; the second clears them, so export
 ## Releasing a change
 
 1. Replace `index.html`
-2. **Bump `const CACHE` in `sw.js`** — currently `cvm-consolidate-v21`
+2. **Bump `const CACHE` in `sw.js`** — currently `cvm-consolidate-v22`
 3. Commit and push; Pages redeploys within a minute
 
 Without step 2, a device that already installed it keeps serving its cached copy. Answers
